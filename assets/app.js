@@ -140,14 +140,29 @@
   }
 
   function muliaTable(v){
-    const dates=v.dates||[];
-    const rows=v.rows||[];
-    let h='<th>NO</th><th>KODE OUTLET</th><th>NAMA CABANG</th><th>NAMA OUTLET</th>'+dates.map(d=>`<th>${esc(dateShort(d))}</th>`).join('')+'<th>GRAND TOTAL</th>';
-    const totals=dates.map(d=>rows.reduce((a,r)=>a+(Number(r.series?.[d])||0),0));
-    const grand=rows.reduce((a,r)=>a+dates.reduce((x,d)=>x+(Number(r.series?.[d])||0),0),0);
-    const b=rows.map((r,i)=>{const gt=dates.reduce((a,d)=>a+(Number(r.series?.[d])||0),0);const cells=dates.map(d=>{const n=Number(r.series?.[d]||0);return `<td>${n?fmt(n,0):'—'}</td>`}).join('');return `<tr><td>${i+1}</td><td>${esc(r.code||'')}</td><td>${esc(r.branch||'')}</td><td class="left">${esc(r.unit_name)}</td>${cells}<td class="num"><strong>${fmt(gt,0)}</strong></td></tr>`}).join('');
-    return `<div class="table-scroll"><table class="report-table mulia-table" id="reportTable"><thead><tr>${h}</tr></thead><tbody>${b}</tbody><tfoot><tr><td colspan="4">GRAND TOTAL</td>${totals.map(n=>`<td>${fmt(n,0)}</td>`).join('')}<td class="num">${fmt(grand,0)}</td></tr></tfoot></table></div>`;
-  }
+  const rows=v.rows||[];
+  const dateSet=new Set(Array.isArray(v.dates)?v.dates:[]);
+  rows.forEach(r=>Object.keys(r.series||{}).forEach(d=>dateSet.add(d)));
+  const dates=[...dateSet].filter(Boolean).sort();
+
+  let h='<th>NO</th><th>KODE OUTLET</th><th>NAMA CABANG</th><th>NAMA OUTLET</th>'
+    +dates.map(d=>`<th>${esc(dateShort(d))}</th>`).join('')
+    +'<th>GRAND TOTAL</th>';
+
+  const totals=dates.map(d=>rows.reduce((a,r)=>a+(Number(r.series?.[d])||0),0));
+  const grand=rows.reduce((a,r)=>a+dates.reduce((x,d)=>x+(Number(r.series?.[d])||0),0),0);
+
+  const b=rows.map((r,i)=>{
+    const gt=dates.reduce((a,d)=>a+(Number(r.series?.[d])||0),0);
+    const cells=dates.map(d=>{
+      const n=Number(r.series?.[d]||0);
+      return `<td>${n?fmt(n,0):'—'}</td>`;
+    }).join('');
+    return `<tr><td>${i+1}</td><td>${esc(r.code||'')}</td><td>${esc(r.branch||'')}</td><td class="left">${esc(r.unit_name||'')}</td>${cells}<td class="num"><strong>${fmt(gt,0)}</strong></td></tr>`;
+  }).join('');
+
+  return `<div class="table-scroll"><table class="report-table mulia-table" id="reportTable"><thead><tr>${h}</tr></thead><tbody>${b}</tbody><tfoot><tr><td colspan="4">GRAND TOTAL</td>${totals.map(n=>`<td>${fmt(n,0)}</td>`).join('')}<td class="num">${fmt(grand,0)}</td></tr></tfoot></table></div>`;
+}
 
   function kpiBranchFlyer(v){
     const rows=[...(v.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name).localeCompare(String(b.unit_name),'id'));
