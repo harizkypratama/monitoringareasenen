@@ -141,9 +141,10 @@
 
   function muliaTable(v){
   const rows=v.rows||[];
-  const dateSet=new Set(Array.isArray(v.dates)?v.dates:[]);
-  rows.forEach(r=>Object.keys(r.series||{}).forEach(d=>dateSet.add(d)));
-  const dates=[...dateSet].filter(Boolean).sort();
+ const reportMonth=String(v.right_date||v.left_date||'').slice(0,7);
+const dateSet=new Set();
+rows.forEach(r=>Object.keys(r.series||{}).forEach(d=>dateSet.add(d)));
+const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
 
   let h='<th>NO</th><th>KODE OUTLET</th><th>NAMA CABANG</th><th>NAMA OUTLET</th>'
     +dates.map(d=>`<th>${esc(dateShort(d))}</th>`).join('')
@@ -219,7 +220,7 @@
     if(scopes)content+=`<div class="scope-switch"><span>LEVEL</span>${scopes}</div>`;
     content+=sortBar;
     if(key==='kpi_tahunan_outlet'&&scope==='cabang') content+=kpiBranchFlyer(v);
-    else content+=`<section class="table-card"><div class="table-bar"><div><b>${esc((key==='tring'?cfg.metrics[currentMetric]?.title:cfg.title).toUpperCase())}</b><span>${esc(dateLabel(v.left_date))}${v.has_comparison?' → '+esc(dateLabel(v.right_date)):''}</span></div><input id="tableSearch" placeholder="Cari ${scope==='cabang'?'cabang':'outlet'}..." type="search"></div><div class="public-table-host">${table(key,key==='tring'?cfg.metrics[currentMetric]:cfg,v)}</div></section>`;
+    else content+=`<section class="table-card"><div class="table-bar"><div><b>${esc((key==='tring'?cfg.metrics[currentMetric]?.title:cfg.title).toUpperCase())}</b><span>${esc(key==='mulia_by_order'?dateLabel(v.right_date||v.left_date):dateLabel(v.left_date))}${key!=='mulia_by_order'&&v.has_comparison?' → '+esc(dateLabel(v.right_date)):''}</span></div><input id="tableSearch" placeholder="Cari ${scope==='cabang'?'cabang':'outlet'}..." type="search"></div><div class="public-table-host">${table(key,key==='tring'?cfg.metrics[currentMetric]:cfg,v)}</div></section>`;
     document.getElementById('app').innerHTML=content;
 
     const search=document.getElementById('tableSearch');
