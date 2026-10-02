@@ -1,5 +1,5 @@
 (() => {
-  const DATA = 'data/public-data.json';
+  const DATA = 'data/public-data.json?v=' + Date.now();
   let data = null;
   const qs = new URLSearchParams(location.search);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
