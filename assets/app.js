@@ -97,13 +97,13 @@
       if(showMtd||showYtd){
         if(showYtd)x+=`<td class="num">${fmt(r.prior_year,0)}</td>`;
         if(showMtd)x+=`<td class="num">${fmt(r.last_month,0)}</td>`;
-        x+=`<td class="num">${fmt(r.left,0)}</td><td class="num blank">${fmt(r.right,0)}</td><td class="num ${cls(r.dtd)}">${signed(r.dtd,0)}</td><td class="num ${cls(r.dtd_pct)}">${pct(r.dtd_pct)}</td>`;
+        x+=`<td class="num">${fmt(r.left,0)}</td><td class="num latest-value">${fmt(r.right,0)}</td><td class="num ${cls(r.dtd)}">${signed(r.dtd,0)}</td><td class="num ${cls(r.dtd_pct)}">${pct(r.dtd_pct)}</td>`;
         if(showMtd)x+=`<td class="num ${cls(r.mtd)}">${signed(r.mtd,0)}</td><td class="num ${cls(r.mtd_pct)}">${pct(r.mtd_pct)}</td>`;
         if(showYtd)x+=`<td class="num ${cls(r.ytd)}">${signed(r.ytd,0)}</td><td class="num ${cls(r.ytd_pct)}">${pct(r.ytd_pct)}</td>`;
         if(isAchievement)x+=`<td class="num ${Number(r.achievement_pct)>=100?'up':'down'}">${fmt(r.right??r.left,0)} / ${pct(r.achievement_pct)}</td>`;
       } else {
         if(key==='osl_rata_emas')x+=`<td class="num">${fmt(r.prior_year,0)}</td>`;
-        x+=`<td class="num">${fmt(r.left,cfg.decimals)}</td><td class="num blank">${fmt(r.right,cfg.decimals)}</td><td class="num ${cls(r.dtd)}">${signed(r.dtd,cfg.decimals)}</td>`;
+        x+=`<td class="num">${fmt(r.left,cfg.decimals)}</td><td class="num latest-value">${fmt(r.right,cfg.decimals)}</td><td class="num ${cls(r.dtd)}">${signed(r.dtd,cfg.decimals)}</td>`;
         if(isTarget)x+=`<td class="num ${Number(r.achievement_pct)>=100?'up':'down'}">${fmt(r.right??r.left,0)} / ${pct(r.achievement_pct)}</td>`;
         else if(key==='osl_rata_emas')x+=`<td class="num ${cls(r.yoy_pct)}">${pct(r.yoy_pct)}</td>`;
       }
@@ -374,32 +374,29 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
 
   function buildKpiBranchExcelSheet(set){
     const rows=[...(set.view?.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id'));
-    const total=rows.reduce((a,r)=>a+(Number(r.right??r.left)||0),0);
+    const total=rows.reduce((a,r)=>a+(Number(r.right??r.left??0)||0),0);
     const aoa=[
       ['PROGRES KPI TAHUNAN'],
       [dateLongUpper(set.view?.right_date||set.view?.left_date)],
       ['TOTAL NILAI KPI',total],
       [],
-      ['RANK','KATEGORI','CABANG','NILAI KPI','KONTRIBUSI','DTD']
+      ['RANK','KATEGORI','CABANG','NILAI KPI','KONTRIBUSI','VISUAL','DTD']
     ];
     rows.forEach((r,i)=>{
-      const value=Number(r.right??r.left??0);
-      const share=total?value/total:null;
+      const value=Number(r.right??r.left??0), share=total?value/total:0;
       const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';
-      aoa.push([i+1,category,r.unit_name||'',value,share,Number(r.dtd??0)]);
+      const bar='█'.repeat(Math.max(0,Math.min(30,Math.round(share*30))));
+      aoa.push([i+1,category,r.unit_name||'',value,share,bar,Number(r.dtd??0)]);
     });
     const ws=XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
-    ws['!cols']=[{wch:8},{wch:10},{wch:28},{wch:15},{wch:14},{wch:14}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:6}},{s:{r:1,c:0},e:{r:1,c:6}}];
+    ws['!cols']=[{wch:8},{wch:10},{wch:28},{wch:15},{wch:14},{wch:34},{wch:14}];
     ws['!rows']=[{hpt:24},{hpt:18},{hpt:20},{hpt:8},{hpt:20}];
     rows.forEach((_,i)=>{
       const r=i+5;
-      const pctCell=ws[XLSX.utils.encode_cell({r,c:4})];
-      if(pctCell)pctCell.z='0.0%';
-      const valCell=ws[XLSX.utils.encode_cell({r,c:3})];
-      if(valCell)valCell.z='0.00';
-      const dtdCell=ws[XLSX.utils.encode_cell({r,c:5})];
-      if(dtdCell)dtdCell.z='0.00';
+      const pctCell=ws[XLSX.utils.encode_cell({r,c:4})]; if(pctCell)pctCell.z='0.0%';
+      const valCell=ws[XLSX.utils.encode_cell({r,c:3})]; if(valCell)valCell.z='0.00';
+      const dtdCell=ws[XLSX.utils.encode_cell({r,c:6})]; if(dtdCell)dtdCell.z='0.00';
     });
     return ws;
   }
@@ -432,32 +429,81 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
   }
 
   function pdfStyle(kind,rows,key){
-    if(key==='nasabah_baru')return {fontSize:4.45,cellPadding:.55};
-    return {fontSize:kind==='mulia'?4.1:(rows.length>55?5.15:rows.length>35?5.7:6.2),cellPadding:rows.length>35?.65:.9};
+    const n=rows.length;
+    if(key==='nasabah_baru') return {fontSize:n>45?3.25:3.6,cellPadding:n>45?.28:.38};
+    if(kind==='mulia') return {fontSize:n>45?3.5:4.0,cellPadding:n>45?.32:.42};
+    if(n>60) return {fontSize:3.15,cellPadding:.28};
+    if(n>50) return {fontSize:3.45,cellPadding:.32};
+    if(n>40) return {fontSize:3.8,cellPadding:.38};
+    if(n>30) return {fontSize:4.2,cellPadding:.45};
+    return {fontSize:4.7,cellPadding:.52};
   }
 
   function drawPdfTablePage(doc,matrix,scope,key,metric){
-    const pw=doc.internal.pageSize.getWidth(), margin=8;
-    const title=matrix.title, headerTitle=matrix.headerTitle;
+    const pw=doc.internal.pageSize.getWidth(), ph=doc.internal.pageSize.getHeight(), margin=5;
     const st=pdfStyle(matrix.kind,matrix.rows,key);
-    const nasabahBaru=key==='nasabah_baru';
-    const tableTop=nasabahBaru?20:25;
-    const titleY=nasabahBaru?8:8, headerY=nasabahBaru?8:13, dateY=nasabahBaru?13:17.5;
-    doc.autoTable({startY:tableTop,margin:{left:margin,right:margin,top:tableTop,bottom:7},head:[matrix.headers],body:matrix.rows,foot:matrix.total?[matrix.total]:[],theme:'grid',pageBreak:nasabahBaru?'avoid':'auto',styles:{font:'helvetica',fontSize:st.fontSize,cellPadding:st.cellPadding,textColor:[20,45,39],lineColor:[185,199,192],lineWidth:.12,overflow:'linebreak',valign:'middle'},headStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize},footStyles:{fillColor:[214,230,221],textColor:[21,63,53],fontStyle:'bold'},alternateRowStyles:{fillColor:[250,252,250]},columnStyles:{0:{halign:'center'},1:{halign:'left'}},didDrawPage:()=>{doc.setTextColor(18,56,47);doc.setFont('helvetica','bold');if(!nasabahBaru){doc.setFontSize(10.5);doc.text(title,pw/2,titleY,{align:'center'});}doc.setFontSize(7.5);doc.text(headerTitle,pw/2,headerY,{align:'center'});doc.setFont('helvetica','normal');doc.setFontSize(6.7);doc.text(dateLongUpper(matrix.reportDate),pw/2,dateY,{align:'center'});}});
+    const tableTop=20;
+    doc.autoTable({
+      startY:tableTop,
+      margin:{left:margin,right:margin,top:tableTop,bottom:5},
+      head:[matrix.headers],
+      body:matrix.rows,
+      foot:matrix.total?[matrix.total]:[],
+      showFoot:'lastPage',
+      theme:'grid',
+      pageBreak:'avoid',
+      rowPageBreak:'avoid',
+      tableWidth:'auto',
+      styles:{font:'helvetica',fontSize:st.fontSize,cellPadding:st.cellPadding,textColor:[20,45,39],lineColor:[185,199,192],lineWidth:.1,overflow:'ellipsize',valign:'middle',minCellHeight:0},
+      headStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize,halign:'center'},
+      footStyles:{fillColor:[214,230,221],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize},
+      alternateRowStyles:{fillColor:[250,252,250]},
+      columnStyles:{0:{halign:'center'}},
+      didDrawPage:()=>{
+        const headerTitle=matrix.headerTitle;
+        doc.setTextColor(18,56,47);
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(9);
+        doc.text(headerTitle,pw/2,8,{align:'center'});
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(6.5);
+        doc.text(dateLongUpper(matrix.reportDate),pw/2,13,{align:'center'});
+      }
+    });
   }
 
   function drawKpiBranchPage(doc,set){
     const rows=[...(set.view?.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name).localeCompare(String(b.unit_name),'id'));
     const pw=doc.internal.pageSize.getWidth(), ph=doc.internal.pageSize.getHeight();
     const total=rows.reduce((a,r)=>a+(Number(r.right??r.left)||0),0);
-    doc.setFillColor(5,60,48);doc.rect(0,0,pw,35,'F');doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(set.title,pw/2,8,{align:'center'});doc.setFontSize(8.2);doc.text('PROGRES KPI TAHUNAN',pw/2,14,{align:'center'});doc.setFontSize(7);doc.text(dateLongUpper(set.view?.right_date||set.view?.left_date),pw/2,19,{align:'center'});doc.setFont('helvetica','normal');doc.text(`TOTAL NILAI KPI: ${fmt(total,2)}   ·   ${rows.length} CABANG`,pw/2,27,{align:'center'});
-    const gap=4, x0=8, width=(pw-16-gap)/2, cardH=28, top=41;
-    rows.forEach((r,i)=>{const col=i%2,row=Math.floor(i/2),x=x0+col*(width+gap),y=top+row*(cardH+gap);if(y+cardH>ph-8)return;const value=Number(r.right??r.left??0),share=total?value/total*100:0,category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';doc.setFillColor(249,252,250);doc.setDrawColor(208,222,215);doc.roundedRect(x,y,width,cardH,2.5,2.5,'FD');doc.setTextColor(104,122,114);doc.setFont('helvetica','bold');doc.setFontSize(5.2);doc.text(`#${i+1}  ${category} · CABANG`,x+4,y+6);doc.setTextColor(18,61,50);doc.setFontSize(7.3);doc.text(String(r.unit_name||''),x+4,y+12);doc.setFontSize(10);doc.text(fmt(value,2),x+4,y+20);doc.setTextColor(Number(r.dtd??0)>=0?30:170,Number(r.dtd??0)>=0?122:45,Number(r.dtd??0)>=0?72:50);doc.setFontSize(6.2);doc.text(`DTD ${signed(r.dtd,2)}`,x+width-4,y+6,{align:'right'});doc.setDrawColor(220,231,225);doc.setFillColor(231,240,235);doc.roundedRect(x+4,y+23,width-8,2,1,1,'FD');doc.setFillColor(41,124,91);doc.roundedRect(x+4,y+23,(width-8)*Math.min(100,share)/100,2,1,1,'F');doc.setTextColor(104,122,114);doc.setFontSize(4.8);doc.text(`KONTRIBUSI ${num(share,1)}%`,x+width-4,y+27,{align:'right'});});
+    doc.setFillColor(5,60,48);doc.rect(0,0,pw,35,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(11.5);doc.text(set.title,pw/2,8,{align:'center'});
+    doc.setFontSize(7.8);doc.text('PROGRES KPI TAHUNAN',pw/2,14,{align:'center'});
+    doc.setFontSize(6.7);doc.text(dateLongUpper(set.view?.right_date||set.view?.left_date),pw/2,19,{align:'center'});
+    doc.setFont('helvetica','normal');doc.text(`TOTAL NILAI KPI: ${fmt(total,2)}   ·   ${rows.length} CABANG`,pw/2,27,{align:'center'});
+
+    const gap=4,x0=8,width=(pw-16-gap)/2,top=41;
+    const cols=2, rowCount=Math.max(1,Math.ceil(rows.length/cols));
+    const cardH=Math.min(27,(ph-top-8-gap*(rowCount-1))/rowCount);
+    rows.forEach((r,i)=>{
+      const col=i%cols,row=Math.floor(i/cols),x=x0+col*(width+gap),y=top+row*(cardH+gap);
+      const value=Number(r.right??r.left??0),share=total?value/total*100:0;
+      const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';
+      doc.setFillColor(249,252,250);doc.setDrawColor(208,222,215);doc.roundedRect(x,y,width,cardH,2.2,2.2,'FD');
+      doc.setTextColor(104,122,114);doc.setFont('helvetica','bold');doc.setFontSize(cardH<21?4.5:5.1);doc.text(`#${i+1}  ${category} · CABANG`,x+4,y+5.5);
+      doc.setTextColor(18,61,50);doc.setFontSize(cardH<21?6.2:7);doc.text(String(r.unit_name||''),x+4,y+11);
+      doc.setFontSize(cardH<21?8.5:10);doc.text(fmt(value,2),x+4,y+18);
+      doc.setTextColor(Number(r.dtd??0)>=0?30:170,Number(r.dtd??0)>=0?122:45,Number(r.dtd??0)>=0?72:50);doc.setFontSize(cardH<21?5.2:6);doc.text(`DTD ${signed(r.dtd,2)}`,x+width-4,y+5.5,{align:'right'});
+      doc.setDrawColor(220,231,225);doc.setFillColor(231,240,235);doc.roundedRect(x+4,y+cardH-6,width-8,1.7,.8,.8,'FD');
+      doc.setFillColor(41,124,91);doc.roundedRect(x+4,y+cardH-6,(width-8)*Math.min(100,share)/100,1.7,.8,.8,'F');
+      doc.setTextColor(104,122,114);doc.setFontSize(4.4);doc.text(`KONTRIBUSI ${num(share,1)}%`,x+width-4,y+cardH-2,{align:'right'});
+    });
   }
 
   async function downloadExcel(key,metric,scope,sort){
     if(!window.XLSX){alert('Komponen Excel belum termuat. Coba refresh halaman.');return;}
-    const sets=reportExportSets(key,metric,scope,sort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
+    const exportSort=sort||sortKeysFor(key)[0]||null;
+    const sets=reportExportSets(key,metric,scope,exportSort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
     const wb=buildExcelWorkbook(sets,key,metric,scope);
     const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.xlsx`;
     XLSX.writeFile(wb,filename);
@@ -466,7 +512,8 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
   async function downloadPdf(key,metric,scope,sort){
     try{
       if(!window.jspdf?.jsPDF||typeof window.jspdf.jsPDF!=='function'||typeof window.jspdf.jsPDF.API.autoTable!=='function'){alert('Komponen PDF belum termuat. Coba refresh halaman.');return;}
-      const sets=reportExportSets(key,metric,scope,sort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
+      const exportSort=sort||sortKeysFor(key)[0]||null;
+    const sets=reportExportSets(key,metric,scope,exportSort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
       const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); let first=true;
       sets.forEach(set=>{if(!set.view)return;if(!first)doc.addPage();first=false;if(key==='kpi_tahunan_outlet'&&set.scope==='cabang')drawKpiBranchPage(doc,set);else drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);});
       const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.pdf`; doc.save(filename);
