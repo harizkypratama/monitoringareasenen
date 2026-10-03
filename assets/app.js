@@ -207,12 +207,30 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
   function reportExportSets(key,metric,scope,sort){
     const cfg=data.reports_meta?.[key]||{};
     if(key==='tring'){
-      return ['nasabah','frekuensi','osl'].map(m=>({key,metric:m,scope:'outlet',view:reportData(key,'outlet',m),sort:sort||'achievement'}));
+      const s=sort||'achievement';
+      return ['nasabah','frekuensi','osl'].map(m=>{
+        const view=reportData(key,'outlet',m);
+        return {key,metric:m,scope:'outlet',view:view?{...view,rows:sortedRows(key,view,s)}:null,sort:s};
+      });
+    }
+    if(key==='kpi_tahunan_outlet'){
+      return ['cabang','outlet'].map(s=>{
+        const view=reportData(key,s,null);
+        if(!view)return {key,metric:null,scope:s,view:null,sort:null};
+        const rows=[...(view.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id'));
+        return {key,metric:null,scope:s,view:{...view,rows},sort:null};
+      });
     }
     if(Array.isArray(cfg.scopes)&&cfg.scopes.includes('cabang')&&cfg.scopes.includes('outlet')){
-      return ['cabang','outlet'].map(s=>({key,metric:null,scope:s,view:reportData(key,s,null),sort:sort||sortKeysFor(key)[0]||null}));
+      const s=sort||null;
+      return ['cabang','outlet'].map(sc=>{
+        const view=reportData(key,sc,null);
+        return {key,metric:null,scope:sc,view:view?{...view,rows:s?sortedRows(key,view,s):[...(view.rows||[])]}:null,sort:s};
+      });
     }
-    return [{key,metric:null,scope:scope||null,view:reportData(key,scope||null,null),sort:sort||sortKeysFor(key)[0]||null}];
+    const s=sort||null;
+    const view=reportData(key,scope||null,null);
+    return [{key,metric:null,scope:scope||null,view:view?{...view,rows:s?sortedRows(key,view,s):[...(view.rows||[])]}:null,sort:s}];
   }
 
   function pdfTitles(key,metric,reportDate){
@@ -261,7 +279,7 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
         return [i+1,r.code||'',r.branch||'',r.unit_name||'',...cells,gt];
       });
       const total=['GRAND TOTAL','','','',...dates.map(d=>(v?.rows||[]).reduce((a,r)=>a+(Number(r.series?.[d])||0),0)),(v?.rows||[]).reduce((a,r)=>a+dates.reduce((x,d)=>x+(Number(r.series?.[d])||0),0),0)];
-      return {headers,rows:[...rows,total],reportDate:v?.right_date||v?.left_date,title:pdfTitles(key,metric,v?.right_date||v?.left_date),headerTitle:pdfHeaderTitle(key,metric),kind:'mulia'};
+      return {headers,rows,total,reportDate:v?.right_date||v?.left_date,title:pdfTitles(key,metric,v?.right_date||v?.left_date),headerTitle:pdfHeaderTitle(key,metric),kind:'mulia'};
     }
     const {isTarget,isAchievement,showMtd,showYtd}=tableFlags(key,cfg);
     const baseDate=v?.right_date||v?.left_date;
@@ -314,7 +332,39 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
       }
       return a;
     });
-    return {headers,rows,reportDate:baseDate,title:key==='tring'?pdfTitles(key,metric,baseDate):pdfTitles(key,metric,baseDate),headerTitle:pdfHeaderTitle(key,metric),kind:'standard'};
+    const total=[];
+    const rowsRaw=v?.rows||[];
+    const sum=k=>rowsRaw.reduce((a,r)=>a+(Number(r[k])||0),0);
+    const totalTarget=rowsRaw.reduce((a,r)=>a+(r.target==null?0:Number(r.target)),0);
+    const totalPriorYear=rowsRaw.reduce((a,r)=>a+(r.prior_year==null?0:Number(r.prior_year)),0);
+    const totalLastMonth=rowsRaw.reduce((a,r)=>a+(r.last_month==null?0:Number(r.last_month)),0);
+    const totalLeft=rowsRaw.reduce((a,r)=>a+(r.left==null?0:Number(r.left)),0);
+    const totalRight=rowsRaw.reduce((a,r)=>a+(r.right==null?0:Number(r.right)),0);
+    const hasRight=rowsRaw.some(r=>r.right!=null);
+    const totalDtd=rowsRaw.reduce((a,r)=>a+(r.dtd==null?0:Number(r.dtd)),0);
+    const currentTotal=hasRight?totalRight:totalLeft;
+    const achievementTotal=totalTarget>0?currentTotal/totalTarget*100:null;
+    const totalMtdCalc=currentTotal-totalLastMonth;
+    const totalYtdCalc=currentTotal-totalPriorYear;
+    const mtdPctTotal=totalLastMonth!==0?(currentTotal/totalLastMonth-1)*100:null;
+    const ytdPctTotal=totalPriorYear!==0?(currentTotal/totalPriorYear-1)*100:null;
+    total.push('','TOTAL');
+    if(isTarget)total.push(forPdf?fmt(totalTarget,cfg.decimals):totalTarget);
+    if(showMtd||showYtd){
+      if(showYtd)total.push(forPdf?fmt(totalPriorYear,0):totalPriorYear);
+      if(showMtd)total.push(forPdf?fmt(totalLastMonth,0):totalLastMonth);
+      total.push(forPdf?fmt(totalLeft,0):totalLeft,forPdf?(hasRight?fmt(totalRight,0):'—'):(hasRight?totalRight:null),forPdf?(v.has_comparison?signed(totalDtd,0):'—'):(v.has_comparison?totalDtd:null),forPdf?(v.has_comparison&&Math.abs(totalLeft)>1e-12?pct((totalRight/totalLeft-1)*100):'—'):(v.has_comparison&&Math.abs(totalLeft)>1e-12?(totalRight/totalLeft-1):null));
+      if(showMtd)total.push(forPdf?signed(totalMtdCalc,0):totalMtdCalc,forPdf?pct(mtdPctTotal):mtdPctTotal==null?null:mtdPctTotal/100);
+      if(showYtd)total.push(forPdf?signed(totalYtdCalc,0):totalYtdCalc,forPdf?pct(ytdPctTotal):ytdPctTotal==null?null:ytdPctTotal/100);
+      if(isAchievement)total.push(forPdf?`${fmt(currentTotal,0)} / ${pct(achievementTotal)}`:currentTotal);
+      if(!forPdf&&isAchievement)total.push(achievementTotal==null?null:achievementTotal/100);
+    } else {
+      if(key==='osl_rata_emas')total.push(forPdf?fmt(totalPriorYear,cfg.decimals):totalPriorYear);
+      total.push(forPdf?fmt(totalLeft,cfg.decimals):totalLeft,forPdf?(hasRight?fmt(totalRight,cfg.decimals):'—'):(hasRight?totalRight:null),forPdf?(v.has_comparison?signed(totalDtd,cfg.decimals):'—'):(v.has_comparison?totalDtd:null));
+      if(isAchievement)total.push(forPdf?`${fmt(currentTotal,0)} / ${pct(achievementTotal)}`:currentTotal,achievementTotal==null?null:achievementTotal/100);
+      else if(key==='osl_rata_emas')total.push(forPdf?'—':null);
+    }
+    return {headers,rows,total,reportDate:baseDate,title:pdfTitles(key,metric,baseDate),headerTitle:pdfHeaderTitle(key,metric),kind:'standard'};
   }
 
   function applySheetWidths(ws,headers){
@@ -322,17 +372,56 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
     ws['!freeze']={xSplit:0,ySplit:1};
   }
 
+  function buildKpiBranchExcelSheet(set){
+    const rows=[...(set.view?.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id'));
+    const total=rows.reduce((a,r)=>a+(Number(r.right??r.left)||0),0);
+    const aoa=[
+      ['PROGRES KPI TAHUNAN'],
+      [dateLongUpper(set.view?.right_date||set.view?.left_date)],
+      ['TOTAL NILAI KPI',total],
+      [],
+      ['RANK','KATEGORI','CABANG','NILAI KPI','KONTRIBUSI','DTD']
+    ];
+    rows.forEach((r,i)=>{
+      const value=Number(r.right??r.left??0);
+      const share=total?value/total:null;
+      const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';
+      aoa.push([i+1,category,r.unit_name||'',value,share,Number(r.dtd??0)]);
+    });
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
+    ws['!cols']=[{wch:8},{wch:10},{wch:28},{wch:15},{wch:14},{wch:14}];
+    ws['!rows']=[{hpt:24},{hpt:18},{hpt:20},{hpt:8},{hpt:20}];
+    rows.forEach((_,i)=>{
+      const r=i+5;
+      const pctCell=ws[XLSX.utils.encode_cell({r,c:4})];
+      if(pctCell)pctCell.z='0.0%';
+      const valCell=ws[XLSX.utils.encode_cell({r,c:3})];
+      if(valCell)valCell.z='0.00';
+      const dtdCell=ws[XLSX.utils.encode_cell({r,c:5})];
+      if(dtdCell)dtdCell.z='0.00';
+    });
+    return ws;
+  }
+
   function buildExcelWorkbook(sets,key,metric,scope){
     const wb=XLSX.utils.book_new();
     sets.forEach(set=>{
+      if(!set.view)return;
+      if(key==='kpi_tahunan_outlet'&&set.scope==='cabang'){
+        XLSX.utils.book_append_sheet(wb,buildKpiBranchExcelSheet(set),'Cabang');
+        return;
+      }
       const matrix=buildMatrix(set.key,set.view,set.scope,set.metric,false);
-      const ws=XLSX.utils.aoa_to_sheet([matrix.headers,...matrix.rows]);
+      const ws=XLSX.utils.aoa_to_sheet([matrix.headers,...matrix.rows,matrix.total||[]]);
       const pctCols=matrix.headers.reduce((a,h,i)=>String(h).toUpperCase().includes('%')?(a.push(i),a):a,[]);
       const numCols=matrix.headers.map((_,i)=>i).filter(i=>i>1&&!pctCols.includes(i));
       matrix.rows.forEach((row,ridx)=>{
         pctCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:ridx+1,c})];if(cell&&typeof cell.v==='number')cell.z='0.0%';});
         numCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:ridx+1,c})];if(cell&&typeof cell.v==='number')cell.z=(data.reports_meta?.[key]?.decimals??0)>0?'#,##0.00':'#,##0';});
       });
+      const totalRow=matrix.rows.length+1;
+      pctCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:totalRow,c})];if(cell&&typeof cell.v==='number')cell.z='0.0%';});
       applySheetWidths(ws,matrix.headers);
       let name=set.scope==='cabang'?'Cabang':set.scope==='outlet'?'Outlet':set.metric?set.metric.charAt(0).toUpperCase()+set.metric.slice(1):'Data';
       if(key==='tring')name={nasabah:'Nasabah TRING',frekuensi:'Frekuensi TRING',osl:'OSL TRING'}[set.metric]||name;
@@ -342,16 +431,19 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
     return wb;
   }
 
-  function pdfStyle(kind,rows){
-    return {fontSize:kind==='mulia'?4.1:(rows.length>55?5.6:6.4),cellPadding:1.1};
+  function pdfStyle(kind,rows,key){
+    if(key==='nasabah_baru')return {fontSize:4.45,cellPadding:.55};
+    return {fontSize:kind==='mulia'?4.1:(rows.length>55?5.15:rows.length>35?5.7:6.2),cellPadding:rows.length>35?.65:.9};
   }
 
   function drawPdfTablePage(doc,matrix,scope,key,metric){
     const pw=doc.internal.pageSize.getWidth(), margin=8;
     const title=matrix.title, headerTitle=matrix.headerTitle;
-    const st=pdfStyle(matrix.kind,matrix.rows);
-    const body=matrix.rows.slice(0,-1); const total=matrix.rows.at(-1);
-    doc.autoTable({startY:25,margin:{left:margin,right:margin,top:25,bottom:9},head:[matrix.headers],body,foot:total?[total]:[],theme:'grid',styles:{font:'helvetica',fontSize:st.fontSize,cellPadding:st.cellPadding,textColor:[20,45,39],lineColor:[185,199,192],lineWidth:.12,overflow:'linebreak',valign:'middle'},headStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize},footStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold'},alternateRowStyles:{fillColor:[250,252,250]},columnStyles:{0:{halign:'center'},1:{halign:'left'}},didDrawPage:()=>{doc.setTextColor(18,56,47);doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.text(title,pw/2,8,{align:'center'});doc.setFontSize(7.5);doc.text(headerTitle,pw/2,13,{align:'center'});doc.setFont('helvetica','normal');doc.setFontSize(6.7);doc.text(dateLongUpper(matrix.reportDate),pw/2,17.5,{align:'center'});doc.setFontSize(5.5);doc.setTextColor(110,125,118);doc.text(`${key==='mulia_by_order'?'Gramasi Mulia By Order':'Monitoring Area Senen'} · ${scope?scope.toUpperCase():''}`,margin,205);}});
+    const st=pdfStyle(matrix.kind,matrix.rows,key);
+    const nasabahBaru=key==='nasabah_baru';
+    const tableTop=nasabahBaru?20:25;
+    const titleY=nasabahBaru?8:8, headerY=nasabahBaru?8:13, dateY=nasabahBaru?13:17.5;
+    doc.autoTable({startY:tableTop,margin:{left:margin,right:margin,top:tableTop,bottom:7},head:[matrix.headers],body:matrix.rows,foot:matrix.total?[matrix.total]:[],theme:'grid',pageBreak:nasabahBaru?'avoid':'auto',styles:{font:'helvetica',fontSize:st.fontSize,cellPadding:st.cellPadding,textColor:[20,45,39],lineColor:[185,199,192],lineWidth:.12,overflow:'linebreak',valign:'middle'},headStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize},footStyles:{fillColor:[214,230,221],textColor:[21,63,53],fontStyle:'bold'},alternateRowStyles:{fillColor:[250,252,250]},columnStyles:{0:{halign:'center'},1:{halign:'left'}},didDrawPage:()=>{doc.setTextColor(18,56,47);doc.setFont('helvetica','bold');if(!nasabahBaru){doc.setFontSize(10.5);doc.text(title,pw/2,titleY,{align:'center'});}doc.setFontSize(7.5);doc.text(headerTitle,pw/2,headerY,{align:'center'});doc.setFont('helvetica','normal');doc.setFontSize(6.7);doc.text(dateLongUpper(matrix.reportDate),pw/2,dateY,{align:'center'});}});
   }
 
   function drawKpiBranchPage(doc,set){
@@ -372,11 +464,13 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
   }
 
   async function downloadPdf(key,metric,scope,sort){
-    if(!window.jspdf?.jsPDF||typeof window.jspdf.jsPDF!=='function'||typeof window.jspdf.jsPDF.API.autoTable!=='function'){alert('Komponen PDF belum termuat. Coba refresh halaman.');return;}
-    const sets=reportExportSets(key,metric,scope,sort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
-    const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); let first=true;
-    sets.forEach(set=>{if(!set.view)return;if(!first)doc.addPage();first=false;if(key==='kpi_tahunan_outlet'&&set.scope==='cabang')drawKpiBranchPage(doc,set);else drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);});
-    const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.pdf`; doc.save(filename);
+    try{
+      if(!window.jspdf?.jsPDF||typeof window.jspdf.jsPDF!=='function'||typeof window.jspdf.jsPDF.API.autoTable!=='function'){alert('Komponen PDF belum termuat. Coba refresh halaman.');return;}
+      const sets=reportExportSets(key,metric,scope,sort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
+      const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); let first=true;
+      sets.forEach(set=>{if(!set.view)return;if(!first)doc.addPage();first=false;if(key==='kpi_tahunan_outlet'&&set.scope==='cabang')drawKpiBranchPage(doc,set);else drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);});
+      const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.pdf`; doc.save(filename);
+    }catch(err){console.error(err);alert('PDF gagal dibuat. Coba refresh halaman lalu ulangi.');}
   }
 
   function report(){
