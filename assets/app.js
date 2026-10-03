@@ -57,6 +57,14 @@
     return `<section class="kpi-cards">${arr.map(c=>`<a class="kpi-card ${activeKey===c.key?'active':''}" href="${reportHref(c.key,(data.reports_meta[c.key]?.scopes||[])[0])}"><div class="kpi-head"><span>${esc(c.title)}</span><i>›</i></div>${c.has_comparison?`<div class="kpi-moves"><div class="up"><b>${c.up}</b><span>Bertumbuh</span></div><div class="down"><b>${c.down}</b><span>Berkurang</span></div><div class="flat"><b>${c.flat}</b><span>Tetap</span></div><div class="move-total"><b>${signed(c.sum_dtd,2)}</b><span>Total DTD</span></div></div>`:`<div class="kpi-pending">Baseline tersimpan · menunggu tanggal berikutnya</div>`}</a>`).join('')}</section>`;
   }
 
+  const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const monthNamesUpper=monthNames.map(x=>x.toUpperCase());
+  const previousMonthEnd = d => { if(!d)return null; const [y,m]=String(d).split('-').map(Number); const x=new Date(Date.UTC(y,m-1,0)); return `${x.getUTCFullYear()}-${String(x.getUTCMonth()+1).padStart(2,'0')}-${String(x.getUTCDate()).padStart(2,'0')}`; };
+  const previousYearEnd = d => { if(!d)return null; return `${Number(String(d).slice(0,4))-1}-12-31`; };
+  const dateLong = d => { if(!d)return '—'; const x=new Date(`${d}T00:00:00`); return `${x.getDate()} ${monthNames[x.getMonth()]} ${x.getFullYear()}`; };
+  const dateLongUpper = d => dateLong(d).toUpperCase();
+  const monthYearUpper = d => { if(!d)return '—'; const x=new Date(`${d}T00:00:00`); return `${monthNamesUpper[x.getMonth()]} ${x.getFullYear()}`; };
+
   function tableFlags(key,cfg){
     return {
       isTarget:['target','deposito','nasabah','osl'].includes(cfg.kind)||key==='tring',
@@ -72,14 +80,14 @@
     let h='<th>NO</th><th>'+(v.scope==='cabang'?'CABANG':'OUTLET')+'</th>';
     if(isTarget) h+='<th>TARGET TAHUNAN</th>';
     if(showMtd||showYtd){
-      if(showYtd)h+='<th>TAHUN LALU</th>';
-      if(showMtd)h+='<th>BULAN LALU</th>';
+      if(showYtd)h+=`<th>${esc(dateLabel(previousYearEnd(v.right_date||v.left_date)))}</th>`;
+      if(showMtd)h+=`<th>${esc(dateLabel(previousMonthEnd(v.right_date||v.left_date)))}</th>`;
       h+=`<th>${esc(dateLabel(v.left_date))}</th><th>${esc(dateLabel(v.right_date))}</th><th>DTD</th><th>DTD %</th>`;
       if(showMtd)h+='<th>MTD</th><th>MTD %</th>';
       if(showYtd)h+='<th>YTD</th><th>YTD %</th>';
       if(isAchievement)h+='<th>PENCAPAIAN</th>';
     } else {
-      if(key==='osl_rata_emas')h+='<th>TAHUN LALU</th>';
+      if(key==='osl_rata_emas')h+=`<th>${esc(dateLabel(previousYearEnd(v.right_date||v.left_date)))}</th>`;
       h+=`<th>${esc(dateLabel(v.left_date))}</th><th>${esc(dateLabel(v.right_date))}</th><th>DTD</th>`;
       if(isTarget)h+='<th>PENCAPAIAN</th>'; else if(key==='osl_rata_emas')h+='<th>YOY</th>';
     }
@@ -180,6 +188,197 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
   }
 
   let currentMetric='nasabah';
+  function reportData(key,scope,metric){
+    const cfg=data.reports_meta?.[key]||{};
+    const id=key==='tring'
+      ? `${key}:${metric||'nasabah'}:outlet`
+      : (cfg.scopes?.length ? `${key}:${scope||cfg.scopes[0]}` : `${key}:default`);
+    return data.reports?.[id]||null;
+  }
+
+  function sortedRows(key,v,sort){
+    if(!v)return [];
+    const rows=[...(v.rows||[])];
+    if(!sort)return rows;
+    const val=r=>({achievement:r.achievement_pct,dtd:r.dtd,mtd:r.mtd,ytd:r.ytd}[sort]);
+    return rows.sort((a,b)=>(Number(val(b)??-Infinity)-Number(val(a)??-Infinity))||String(a.unit_key).localeCompare(String(b.unit_key),'id'));
+  }
+
+  function reportExportSets(key,metric,scope,sort){
+    const cfg=data.reports_meta?.[key]||{};
+    if(key==='tring'){
+      return ['nasabah','frekuensi','osl'].map(m=>({key,metric:m,scope:'outlet',view:reportData(key,'outlet',m),sort:sort||'achievement'}));
+    }
+    if(Array.isArray(cfg.scopes)&&cfg.scopes.includes('cabang')&&cfg.scopes.includes('outlet')){
+      return ['cabang','outlet'].map(s=>({key,metric:null,scope:s,view:reportData(key,s,null),sort:sort||sortKeysFor(key)[0]||null}));
+    }
+    return [{key,metric:null,scope:scope||null,view:reportData(key,scope||null,null),sort:sort||sortKeysFor(key)[0]||null}];
+  }
+
+  function pdfTitles(key,metric,reportDate){
+    const d=dateLongUpper(reportDate), my=monthYearUpper(reportDate);
+    const map={
+      deposito_monitoring:`MONITORING PRODUK DEPOSITO EMAS KANTOR AREA SENEN ${d}`,
+      omset_emas:`MONEV KINERJA OMSET EMAS (TANPA MTE) AREA SENEN ${d}`,
+      mulia_by_order:`GRAMASI MULIA BY ORDER PER TANGGAL ${my}`,
+      osl_rata_emas:`MONITORING OSL AKTIF RATA RATA PRODUK EMAS ${d}`,
+      nasabah_baru:`JUMLAH NASABAH BARU PER TANGGAL ${d}`,
+      nasabah_aktif:`JUMLAH NASABAH AKTIF PEMBIAYAAN TAHUNAN ${d}`,
+      lar_emas:`PROGRES KPI LAR EMAS PER ${d}`,
+      deposito_emas_kpi:`PROGRES KPI DEPOSITO EMAS PER ${d}`,
+      kpi_tahunan_outlet:`PROGRES KPI TAHUNAN PER ${d}`,
+    };
+    if(key==='tring')return `DETAIL NASABAH AKTIF BERTRANSAKSI TRING ${d}`;
+    return map[key]||`${String(data.reports_meta?.[key]?.title||key).toUpperCase()} ${d}`;
+  }
+
+  function pdfHeaderTitle(key,metric){
+    const map={
+      deposito_monitoring:'MONITORING PRODUK DEPOSITO EMAS KANTOR AREA SENEN',
+      omset_emas:'MONITORING OMSET PRODUK EMAS KANTOR AREA SENEN',
+      mulia_by_order:'Daftar Kredit Mulia By Status Order',
+      osl_rata_emas:'MONITORING OSL AKTIF RATA RATA PRODUK EMAS KANTOR AREA SENEN',
+      nasabah_baru:'JUMLAH NASABAH BARU',
+      nasabah_aktif:'NASABAH AKTIF PEMBIAYAAN TAHUNAN',
+      lar_emas:'PROGRES KPI LAR EMAS',
+      deposito_emas_kpi:'PROGRES KPI DEPOSITO EMAS',
+      kpi_tahunan_outlet:'PROGRES KPI TAHUNAN',
+    };
+    if(key==='tring')return String(data.reports_meta?.tring?.metrics?.[metric]?.title||metric||'TRING').toUpperCase();
+    return map[key]||String(data.reports_meta?.[key]?.title||key).toUpperCase();
+  }
+
+  function buildMatrix(key,v,scope,metric,forPdf=false){
+    const cfg=data.reports_meta?.[key]||{};
+    if(key==='mulia_by_order'){
+      const reportMonth=String(v?.right_date||v?.left_date||'').slice(0,7);
+      const dateSet=new Set();
+      (v?.rows||[]).forEach(r=>Object.keys(r.series||{}).forEach(d=>{if(String(d).slice(0,7)===reportMonth)dateSet.add(d);}));
+      const dates=[...dateSet].sort();
+      const headers=['NO','KODE OUTLET','NAMA CABANG','NAMA OUTLET',...dates.map(dateShort),'GRAND TOTAL'];
+      const rows=(v?.rows||[]).map((r,i)=>{
+        let gt=0; const cells=dates.map(d=>{const n=Number(r.series?.[d]||0);gt+=n;return n;});
+        return [i+1,r.code||'',r.branch||'',r.unit_name||'',...cells,gt];
+      });
+      const total=['GRAND TOTAL','','','',...dates.map(d=>(v?.rows||[]).reduce((a,r)=>a+(Number(r.series?.[d])||0),0)),(v?.rows||[]).reduce((a,r)=>a+dates.reduce((x,d)=>x+(Number(r.series?.[d])||0),0),0)];
+      return {headers,rows:[...rows,total],reportDate:v?.right_date||v?.left_date,title:pdfTitles(key,metric,v?.right_date||v?.left_date),headerTitle:pdfHeaderTitle(key,metric),kind:'mulia'};
+    }
+    const {isTarget,isAchievement,showMtd,showYtd}=tableFlags(key,cfg);
+    const baseDate=v?.right_date||v?.left_date;
+    const pm=previousMonthEnd(baseDate), py=previousYearEnd(baseDate);
+    const headers=['NO',scope==='cabang'?'CABANG':'OUTLET'];
+    if(isTarget)headers.push('TARGET TAHUNAN');
+    if(showMtd||showYtd){
+      if(showYtd)headers.push(dateLabel(py));
+      if(showMtd)headers.push(dateLabel(pm));
+      headers.push(dateLabel(v.left_date),dateLabel(v.right_date),'DTD','DTD %');
+      if(showMtd)headers.push('MTD','MTD %');
+      if(showYtd)headers.push('YTD','YTD %');
+      if(isAchievement){
+        if(forPdf)headers.push('PENCAPAIAN'); else headers.push('REALISASI TERKINI','PENCAPAIAN %');
+      }
+    } else {
+      if(key==='osl_rata_emas')headers.push(dateLabel(py));
+      headers.push(dateLabel(v.left_date),dateLabel(v.right_date),'DTD');
+      if(isAchievement){ if(forPdf)headers.push('PENCAPAIAN'); else headers.push('REALISASI TERKINI','PENCAPAIAN %'); }
+      else if(key==='osl_rata_emas')headers.push('YOY %');
+    }
+    const rows=(v?.rows||[]).map((r,i)=>{
+      const a=[i+1,r.unit_key]; if(isTarget)a.push(r.target);
+      if(showMtd||showYtd){
+        if(showYtd)a.push(forPdf?fmt(r.prior_year,0):r.prior_year);
+        if(showMtd)a.push(forPdf?fmt(r.last_month,0):r.last_month);
+        a.push(
+          forPdf?fmt(r.left,cfg.decimals):r.left,
+          forPdf?fmt(r.right,cfg.decimals):r.right,
+          forPdf?signed(r.dtd,cfg.decimals):r.dtd,
+          forPdf?(r.dtd_pct==null?'—':pct(r.dtd_pct)):(r.dtd_pct==null?null:r.dtd_pct/100)
+        );
+        if(showMtd)a.push(
+          forPdf?signed(r.mtd,cfg.decimals):r.mtd,
+          forPdf?(r.mtd_pct==null?'—':pct(r.mtd_pct)):(r.mtd_pct==null?null:r.mtd_pct/100)
+        );
+        if(showYtd)a.push(
+          forPdf?signed(r.ytd,cfg.decimals):r.ytd,
+          forPdf?(r.ytd_pct==null?'—':pct(r.ytd_pct)):(r.ytd_pct==null?null:r.ytd_pct/100)
+        );
+        if(isAchievement){
+          const cur=r.right??r.left;
+          if(forPdf)a.push(`${fmt(cur,0)} / ${pct(r.achievement_pct)}`); else a.push(cur,r.achievement_pct==null?null:r.achievement_pct/100);
+        }
+      } else {
+        if(key==='osl_rata_emas')a.push(forPdf?fmt(r.prior_year,0):r.prior_year);
+        a.push(forPdf?fmt(r.left,cfg.decimals):r.left,forPdf?fmt(r.right,cfg.decimals):r.right,forPdf?signed(r.dtd,cfg.decimals):r.dtd);
+        if(isAchievement){const cur=r.right??r.left;if(forPdf)a.push(`${fmt(cur,0)} / ${pct(r.achievement_pct)}`);else a.push(cur,r.achievement_pct==null?null:r.achievement_pct/100);}
+        else if(key==='osl_rata_emas')a.push(forPdf?(r.yoy_pct==null?'—':pct(r.yoy_pct)):(r.yoy_pct==null?null:r.yoy_pct/100));
+      }
+      return a;
+    });
+    return {headers,rows,reportDate:baseDate,title:key==='tring'?pdfTitles(key,metric,baseDate):pdfTitles(key,metric,baseDate),headerTitle:pdfHeaderTitle(key,metric),kind:'standard'};
+  }
+
+  function applySheetWidths(ws,headers){
+    ws['!cols']=headers.map((h,i)=>({wch:Math.min(24,Math.max(8,String(h).length+2+(i===1?8:0)))}));
+    ws['!freeze']={xSplit:0,ySplit:1};
+  }
+
+  function buildExcelWorkbook(sets,key,metric,scope){
+    const wb=XLSX.utils.book_new();
+    sets.forEach(set=>{
+      const matrix=buildMatrix(set.key,set.view,set.scope,set.metric,false);
+      const ws=XLSX.utils.aoa_to_sheet([matrix.headers,...matrix.rows]);
+      const pctCols=matrix.headers.reduce((a,h,i)=>String(h).toUpperCase().includes('%')?(a.push(i),a):a,[]);
+      const numCols=matrix.headers.map((_,i)=>i).filter(i=>i>1&&!pctCols.includes(i));
+      matrix.rows.forEach((row,ridx)=>{
+        pctCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:ridx+1,c})];if(cell&&typeof cell.v==='number')cell.z='0.0%';});
+        numCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:ridx+1,c})];if(cell&&typeof cell.v==='number')cell.z=(data.reports_meta?.[key]?.decimals??0)>0?'#,##0.00':'#,##0';});
+      });
+      applySheetWidths(ws,matrix.headers);
+      let name=set.scope==='cabang'?'Cabang':set.scope==='outlet'?'Outlet':set.metric?set.metric.charAt(0).toUpperCase()+set.metric.slice(1):'Data';
+      if(key==='tring')name={nasabah:'Nasabah TRING',frekuensi:'Frekuensi TRING',osl:'OSL TRING'}[set.metric]||name;
+      name=name.slice(0,31);
+      XLSX.utils.book_append_sheet(wb,ws,name);
+    });
+    return wb;
+  }
+
+  function pdfStyle(kind,rows){
+    return {fontSize:kind==='mulia'?4.1:(rows.length>55?5.6:6.4),cellPadding:1.1};
+  }
+
+  function drawPdfTablePage(doc,matrix,scope,key,metric){
+    const pw=doc.internal.pageSize.getWidth(), margin=8;
+    const title=matrix.title, headerTitle=matrix.headerTitle;
+    const st=pdfStyle(matrix.kind,matrix.rows);
+    const body=matrix.rows.slice(0,-1); const total=matrix.rows.at(-1);
+    doc.autoTable({startY:25,margin:{left:margin,right:margin,top:25,bottom:9},head:[matrix.headers],body,foot:total?[total]:[],theme:'grid',styles:{font:'helvetica',fontSize:st.fontSize,cellPadding:st.cellPadding,textColor:[20,45,39],lineColor:[185,199,192],lineWidth:.12,overflow:'linebreak',valign:'middle'},headStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize},footStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold'},alternateRowStyles:{fillColor:[250,252,250]},columnStyles:{0:{halign:'center'},1:{halign:'left'}},didDrawPage:()=>{doc.setTextColor(18,56,47);doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.text(title,pw/2,8,{align:'center'});doc.setFontSize(7.5);doc.text(headerTitle,pw/2,13,{align:'center'});doc.setFont('helvetica','normal');doc.setFontSize(6.7);doc.text(dateLongUpper(matrix.reportDate),pw/2,17.5,{align:'center'});doc.setFontSize(5.5);doc.setTextColor(110,125,118);doc.text(`${key==='mulia_by_order'?'Gramasi Mulia By Order':'Monitoring Area Senen'} · ${scope?scope.toUpperCase():''}`,margin,205);}});
+  }
+
+  function drawKpiBranchPage(doc,set){
+    const rows=[...(set.view?.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name).localeCompare(String(b.unit_name),'id'));
+    const pw=doc.internal.pageSize.getWidth(), ph=doc.internal.pageSize.getHeight();
+    const total=rows.reduce((a,r)=>a+(Number(r.right??r.left)||0),0);
+    doc.setFillColor(5,60,48);doc.rect(0,0,pw,35,'F');doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(set.title,pw/2,8,{align:'center'});doc.setFontSize(8.2);doc.text('PROGRES KPI TAHUNAN',pw/2,14,{align:'center'});doc.setFontSize(7);doc.text(dateLongUpper(set.view?.right_date||set.view?.left_date),pw/2,19,{align:'center'});doc.setFont('helvetica','normal');doc.text(`TOTAL NILAI KPI: ${fmt(total,2)}   ·   ${rows.length} CABANG`,pw/2,27,{align:'center'});
+    const gap=4, x0=8, width=(pw-16-gap)/2, cardH=28, top=41;
+    rows.forEach((r,i)=>{const col=i%2,row=Math.floor(i/2),x=x0+col*(width+gap),y=top+row*(cardH+gap);if(y+cardH>ph-8)return;const value=Number(r.right??r.left??0),share=total?value/total*100:0,category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';doc.setFillColor(249,252,250);doc.setDrawColor(208,222,215);doc.roundedRect(x,y,width,cardH,2.5,2.5,'FD');doc.setTextColor(104,122,114);doc.setFont('helvetica','bold');doc.setFontSize(5.2);doc.text(`#${i+1}  ${category} · CABANG`,x+4,y+6);doc.setTextColor(18,61,50);doc.setFontSize(7.3);doc.text(String(r.unit_name||''),x+4,y+12);doc.setFontSize(10);doc.text(fmt(value,2),x+4,y+20);doc.setTextColor(Number(r.dtd??0)>=0?30:170,Number(r.dtd??0)>=0?122:45,Number(r.dtd??0)>=0?72:50);doc.setFontSize(6.2);doc.text(`DTD ${signed(r.dtd,2)}`,x+width-4,y+6,{align:'right'});doc.setDrawColor(220,231,225);doc.setFillColor(231,240,235);doc.roundedRect(x+4,y+23,width-8,2,1,1,'FD');doc.setFillColor(41,124,91);doc.roundedRect(x+4,y+23,(width-8)*Math.min(100,share)/100,2,1,1,'F');doc.setTextColor(104,122,114);doc.setFontSize(4.8);doc.text(`KONTRIBUSI ${num(share,1)}%`,x+width-4,y+27,{align:'right'});});
+  }
+
+  async function downloadExcel(key,metric,scope,sort){
+    if(!window.XLSX){alert('Komponen Excel belum termuat. Coba refresh halaman.');return;}
+    const sets=reportExportSets(key,metric,scope,sort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
+    const wb=buildExcelWorkbook(sets,key,metric,scope);
+    const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.xlsx`;
+    XLSX.writeFile(wb,filename);
+  }
+
+  async function downloadPdf(key,metric,scope,sort){
+    if(!window.jspdf?.jsPDF||typeof window.jspdf.jsPDF!=='function'||typeof window.jspdf.jsPDF.API.autoTable!=='function'){alert('Komponen PDF belum termuat. Coba refresh halaman.');return;}
+    const sets=reportExportSets(key,metric,scope,sort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
+    const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); let first=true;
+    sets.forEach(set=>{if(!set.view)return;if(!first)doc.addPage();first=false;if(key==='kpi_tahunan_outlet'&&set.scope==='cabang')drawKpiBranchPage(doc,set);else drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);});
+    const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.pdf`; doc.save(filename);
+  }
+
   function report(){
     const key=qs.get('report')||'lar_emas';
     const cfg=data.reports_meta?.[key];
@@ -216,7 +415,7 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
     if(activeNav==='TRING') content+=metricCards();
     else if(activeNav==='PROGRES KPI') content+=kpiCards(key);
     content+=`<section class="subnav"><div class="subnav-inner">${sub}</div></section>`;
-    content+=`<div class="report-head"><div><span class="eyebrow">${esc(activeNav)}</span><h1>${esc(key==='tring'?(cfg.metrics[currentMetric]?.title||cfg.title):cfg.title)}</h1></div></div>`;
+    content+=`<div class="report-head"><div><span class="eyebrow">${esc(activeNav)}</span><h1>${esc(key==='tring'?(cfg.metrics[currentMetric]?.title||cfg.title):cfg.title)}</h1></div><div class="export-actions"><button class="pdf-button" id="downloadExcel" type="button">Download Excel</button><button class="pdf-button pdf-secondary" id="downloadPdf" type="button">Download PDF</button></div></div>`;
     if(scopes)content+=`<div class="scope-switch"><span>LEVEL</span>${scopes}</div>`;
     content+=sortBar;
     if(key==='kpi_tahunan_outlet'&&scope==='cabang') content+=kpiBranchFlyer(v);
@@ -229,6 +428,8 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
       const s=btn.dataset.sort;
       const next=new URLSearchParams(location.search); next.set('sort',s); location.search=next.toString();
     }));
+    document.getElementById('downloadExcel')?.addEventListener('click',()=>downloadExcel(key,currentMetric,scope,sort));
+    document.getElementById('downloadPdf')?.addEventListener('click',()=>downloadPdf(key,currentMetric,scope,sort));
   }
 
   fetch(DATA,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('Data publik belum tersedia');return r.json();}).then(j=>{data=j;nav();if(location.pathname.endsWith('report.html'))report();else home();}).catch(()=>{
