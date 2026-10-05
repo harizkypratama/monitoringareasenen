@@ -180,10 +180,38 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
     return `<section class="kpi-branch-flyer"><div class="kpi-flyer-head"><div><span class="eyebrow light">PROGRES KPI TAHUNAN</span><h2>Performa Cabang</h2><p>Detail KPI terbaru · ${rows.length} cabang · kategori CP &amp; CPS</p></div><div class="kpi-flyer-total"><small>TOTAL NILAI KPI</small><strong>${fmt(totalKpi,2)}</strong><span>DTD ${signed(totalDtd,2)}</span></div></div><div class="kpi-branch-grid">${rows.map((r,i)=>{const value=Number(r.right??r.left??0);const share=totalKpi>0?value/totalKpi*100:0;const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';return `<article class="kpi-branch-card"><div class="kpi-rank">#${i+1}</div><div class="kpi-branch-top"><div><small>${category} · CABANG</small><h3>${esc(r.unit_name)}</h3></div><div class="kpi-dtd ${cls(r.dtd)}">${signed(r.dtd,2)}</div></div><div class="kpi-value">${fmt(value,2)}</div><div class="kpi-bar"><i style="width:${Math.min(100,share).toFixed(2)}%"></i></div><div class="kpi-branch-meta"><span>KONTRIBUSI KE TOTAL KPI</span><b>${num(share,1)}%</b></div></article>`}).join('')}</div></section>`;
   }
 
+  function muliaRowTotal(r){
+    return Object.values(r?.series||{}).reduce((a,v)=>a+(Number(v)||0),0);
+  }
+
+  function muliaLatestDate(r){
+    return Object.keys(r?.series||{})
+      .filter(d=>Number(r.series?.[d])>0)
+      .sort()
+      .pop() || '';
+  }
+
+  function sortedMuliaRows(rows,sort='total'){
+    const out=[...(rows||[])];
+    return out.sort((a,b)=>{
+      const totalA=muliaRowTotal(a), totalB=muliaRowTotal(b);
+      const dateA=muliaLatestDate(a), dateB=muliaLatestDate(b);
+      if(sort==='latest_date'){
+        return (dateB.localeCompare(dateA))
+          || (totalB-totalA)
+          || String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id');
+      }
+      return (totalB-totalA)
+        || dateB.localeCompare(dateA)
+        || String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id');
+    });
+  }
+
   function sortKeysFor(key){
+    if(key==='mulia_by_order')return ['total','latest_date'];
     const {showMtd,showYtd,isAchievement}=tableFlags(key,data.reports_meta[key]||{});
     const isKpiPage=['lar_emas','deposito_emas_kpi','kpi_tahunan_outlet'].includes(key);
-    if(key==='mulia_by_order'||isKpiPage)return [];
+    if(isKpiPage)return [];
     return ['dtd',...(showMtd?['mtd']:[]),...(showYtd?['ytd']:[]),...(isAchievement?['achievement']:[])];
   }
 
@@ -198,6 +226,7 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
 
   function sortedRows(key,v,sort){
     if(!v)return [];
+    if(key==='mulia_by_order')return sortedMuliaRows(v.rows||[],sort||'total');
     const rows=[...(v.rows||[])];
     if(!sort)return rows;
     const val=r=>({achievement:r.achievement_pct,dtd:r.dtd,mtd:r.mtd,ytd:r.ytd}[sort]);
@@ -515,7 +544,14 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
       const exportSort=sort||sortKeysFor(key)[0]||null;
     const sets=reportExportSets(key,metric,scope,exportSort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
       const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); let first=true;
-      sets.forEach(set=>{if(!set.view)return;if(!first)doc.addPage();first=false;if(key==='kpi_tahunan_outlet'&&set.scope==='cabang')drawKpiBranchPage(doc,set);else drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);});
+      sets.forEach(set=>{
+        if(!set.view)return;
+        if(!first)doc.addPage();
+        first=false;
+        // Semua laporan PDF, termasuk Progres KPI Tahunan, memakai renderer tabel
+        // yang sama. Hindari renderer kartu khusus agar export tetap stabil.
+        drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);
+      });
       const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.pdf`; doc.save(filename);
     }catch(err){console.error(err);alert('PDF gagal dibuat. Coba refresh halaman lalu ulangi.');}
   }
@@ -548,10 +584,14 @@ const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
     const requestedSort=qs.get('sort');
     const sort=sortKeys.includes(requestedSort)?requestedSort:sortKeys[0]||null;
     if(sort){
-      const val=r=>({achievement:r.achievement_pct,dtd:r.dtd,mtd:r.mtd,ytd:r.ytd}[sort]);
-      v={...v,rows:[...(v.rows||[])].sort((a,b)=>(Number(val(b)??-Infinity)-Number(val(a)??-Infinity))||String(a.unit_key).localeCompare(String(b.unit_key),'id'))};
+      if(key==='mulia_by_order')v={...v,rows:sortedMuliaRows(v.rows||[],sort)};
+      else{
+        const val=r=>({achievement:r.achievement_pct,dtd:r.dtd,mtd:r.mtd,ytd:r.ytd}[sort]);
+        v={...v,rows:[...(v.rows||[])].sort((a,b)=>(Number(val(b)??-Infinity)-Number(val(a)??-Infinity))||String(a.unit_key).localeCompare(String(b.unit_key),'id'))};
+      }
     }
-    const sortBar=sortKeys.length?`<div class="sort-bar"><span>SORT BY</span>${sortKeys.map(s=>`<button class="sort-pill ${sort===s?'active':''}" data-sort="${s}">${s==='achievement'?'PENCAPAIAN':s.toUpperCase()}</button>`).join('')}</div>`:'';
+    const sortLabel=s=>({achievement:'PENCAPAIAN',latest_date:'TANGGAL TERAKHIR',total:'TOTAL'}[s]||String(s).toUpperCase());
+    const sortBar=sortKeys.length?`<div class="sort-bar"><span>SORT BY</span>${sortKeys.map(s=>`<button class="sort-pill ${sort===s?'active':''}" data-sort="${s}">${sortLabel(s)}</button>`).join('')}</div>`:'';
     let content='';
     if(activeNav==='TRING') content+=metricCards();
     else if(activeNav==='PROGRES KPI') content+=kpiCards(key);
