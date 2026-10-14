@@ -1,6 +1,6 @@
 {
     "schema_version": 1,
-    "generated_at": "2026-10-14T11:27:53+07:00",
+    "generated_at": "2026-10-14T11:33:53+07:00",
     "app_name": "Monitoring Laporan Area Senen",
     "latest": "2026-10-13",
     "nav_order": [
@@ -9516,6 +9516,27 @@
                     "series": []
                 },
                 {
+                    "unit_key": "12325:UPC SENYUM KRAMAT SENTIONG",
+                    "unit_name": "UPC SENYUM KRAMAT SENTIONG",
+                    "target": null,
+                    "left": 210162950,
+                    "right": 241812950,
+                    "dtd": 31650000,
+                    "dtd_pct": 15.059742928047015,
+                    "mtd": -353816860,
+                    "mtd_pct": -59.402141071481964,
+                    "achievement_pct": null,
+                    "yoy_pct": -65.56525186259512,
+                    "ytd_pct": -65.56525186259512,
+                    "prior_year": 702235280,
+                    "ytd": -460422330,
+                    "prior_ytd": 3370560690,
+                    "last_month": 595629810,
+                    "code": null,
+                    "branch": null,
+                    "series": []
+                },
+                {
                     "unit_key": "12418:UPC PASAR KAMPUNG AMBON",
                     "unit_name": "UPC PASAR KAMPUNG AMBON",
                     "target": null,
@@ -10288,27 +10309,6 @@
                     "ytd": -102473350,
                     "prior_ytd": 763805000,
                     "last_month": 259885950,
-                    "code": null,
-                    "branch": null,
-                    "series": []
-                },
-                {
-                    "unit_key": "12325:UPC SENYUM KRAMAT SENTIONG",
-                    "unit_name": "UPC SENYUM KRAMAT SENTIONG",
-                    "target": null,
-                    "left": 0,
-                    "right": 0,
-                    "dtd": 0,
-                    "dtd_pct": null,
-                    "mtd": -595629810,
-                    "mtd_pct": -100,
-                    "achievement_pct": null,
-                    "yoy_pct": null,
-                    "ytd_pct": null,
-                    "prior_year": 0,
-                    "ytd": 0,
-                    "prior_ytd": 0,
-                    "last_month": 595629810,
                     "code": null,
                     "branch": null,
                     "series": []
