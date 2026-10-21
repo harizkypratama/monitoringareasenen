@@ -1,620 +1,300 @@
 (() => {
-  const DATA = 'data/public-data.json?v=' + Date.now();
+  'use strict';
+  const DATA_URL = 'data/public-data.json';
+  const GROUP_ORDER = ['KPI', 'OSL', 'NASABAH', 'KREDIT', 'EMAS', 'TRING', 'SINERGI HOLDING'];
+  const GROUP_COMPONENTS = {
+    OSL: ['OSL AKTIF RATA-RATA GADAI','OSL AKTIF RATA-RATA NON GADAI','OSL AKTIF RATA-RATA EMAS','OSL GROSS POSISI'],
+    NASABAH: ['NASABAH BARU','NASABAH BARU AGEN','NASABAH PEMBIAYAAN TAHUNAN','NASABAH TABUNGAN EMAS'],
+    KREDIT: ['NPL GADAI','NPL NON GADAI','NPL EMAS','LAR GADAI','LAR NON GADAI','LAR EMAS'],
+    EMAS: ['DEPOSITO EMAS','TABUNGAN EMAS','GRAMASI PRODUK GALERI 24'],
+    TRING: ['NASABAH TRING!','OSL LAYANAN TRING!','FREKUENSI TRANSAKSI TRING!'],
+    'SINERGI HOLDING': ['CASHLESS DISBURSEMENT','OSL SINERGI HOLDING','TE SINERGI HOLDING']
+  };
+  const CATEGORY_BY_SCOPE = {
+    area: ['AREA'],
+    cabang: ['CP','CPS'],
+    outlet: ['COLOCATION','UPC','UPC GADAI','UPS','UPS GADAI']
+  };
+  const CATEGORY_LABEL = { area:'Area', cabang:'Cabang', outlet:'Outlet' };
+  const params = new URLSearchParams(location.search);
   let data = null;
-  const qs = new URLSearchParams(location.search);
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-  const num = (v,d=0) => v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toLocaleString('id-ID',{minimumFractionDigits:d,maximumFractionDigits:d});
-  const fmt = (v,d=0) => num(v,d);
-  const pct = v => v == null || Number.isNaN(Number(v)) ? '—' : `${num(v,1)}%`;
-  const signed = (v,d=0) => v == null || Number.isNaN(Number(v)) ? '—' : `${Number(v)>0?'+':''}${num(v,d)}`;
-  const cls = v => v == null ? 'muted' : Number(v)>0 ? 'up' : Number(v)<0 ? 'down' : 'flat';
-  const dateLabel = x => { if(!x) return '—'; const d=new Date(`${x}T00:00:00`); return d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'}); };
-  const dateShort = x => { if(!x) return '—'; const d=new Date(`${x}T00:00:00`); return d.toLocaleDateString('id-ID',{day:'numeric',month:'short'}); };
-  const reportHref = (key,scope,metric,sort) => { const p=new URLSearchParams({report:key}); if(scope) p.set('scope',scope); if(metric) p.set('metric',metric); if(sort) p.set('sort',sort); return `report.html?${p}`; };
+  let currentGroup = GROUP_ORDER.includes(params.get('category')?.toUpperCase()) ? params.get('category').toUpperCase() : 'KPI';
+  let currentScope = ['area','cabang','outlet'].includes(params.get('scope')) ? params.get('scope') : 'outlet';
+  let currentMetric = params.get('component') || '';
+  let currentSort = ['dtd','mtd','achievement'].includes(params.get('sort')) ? params.get('sort') : 'achievement';
+  let currentCategoryFilter = params.get('filter') || 'ALL';
+  let showTarget = params.get('target') !== '0';
+  let searchTerm = '';
 
-  const navGroups = () => {
-    const groups={}; (data.nav_order||[]).forEach(n=>groups[n]=[]);
-    Object.entries(data.reports_meta||{}).forEach(([k,c])=>(groups[c.nav]??=[]).push([k,c]));
-    return groups;
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const valid = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  const nval = (v, d=0) => valid(v) ? Number(v).toLocaleString('id-ID', {minimumFractionDigits:d, maximumFractionDigits:d}) : '—';
+  const pval = v => valid(v) ? `${nval(v, 2)}%` : '—';
+  const signed = (v, d=0) => valid(v) ? `${Number(v)>0?'+':''}${nval(v,d)}` : '—';
+  const moneyClass = v => !valid(v) || Number(v)===0 ? 'tone-flat' : Number(v)>0 ? 'tone-positive' : 'tone-negative';
+  const dateLabel = (s, full=true) => {
+    if (!s) return '—';
+    const d = new Date(`${String(s).slice(0,10)}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return esc(s);
+    return d.toLocaleDateString('id-ID', full ? {day:'2-digit',month:'short',year:'numeric'} : {day:'2-digit',month:'short'});
   };
+  const slug = s => String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  const metricGroup = name => Object.keys(GROUP_COMPONENTS).find(g => GROUP_COMPONENTS[g].includes(String(name||'').toUpperCase())) || '';
+  const currentMetricObj = () => (data?.metric_groups?.[currentGroup] || []).find(m => m.key === currentMetric) || null;
+  const currentView = (m=currentMetricObj(), scope=currentScope) => m?.views?.[scope] || null;
+  const latestValue = r => valid(r?.right) ? Number(r.right) : valid(r?.left) ? Number(r.left) : null;
+  const targetValue = r => valid(r?.target) ? Number(r.target) : null;
+  const achievement = r => { const v=latestValue(r), t=targetValue(r); return v!==null && t!==null && t!==0 ? v/t*100 : null; };
+  const gap = r => { const v=latestValue(r), t=targetValue(r); return v!==null && t!==null ? v-t : null; };
+  const fmtMetric = (v, m=currentMetricObj()) => nval(v, Number(m?.decimals||0));
 
-  const nav = (activeNav=null) => {
-    const el=document.getElementById('categoryNav'); if(!el) return;
-    const groups=navGroups();
-    el.innerHTML=(data.nav_order||[]).map(n=>{
-      const x=groups[n]?.[0];
-      return x?`<a class="category-tab ${activeNav===n?'active':''}" href="${reportHref(x[0],x[1].scopes?.[0],x[0]==='tring'?'nasabah':null)}">${esc(n)}</a>`:'';
-    }).join('');
-  };
-
-  function home(){
-    document.title='Monitoring Laporan Area Senen';
-    document.getElementById('topDate').textContent=dateLabel(data.latest);
-    document.getElementById('heroDate').textContent=dateLabel(data.latest);
-    nav();
-    const grid=document.getElementById('categoryGrid'); const groups=navGroups();
-    grid.innerHTML=(data.nav_order||[]).map(navName=>{
-      const items=groups[navName]||[]; if(!items.length)return '';
-      const first=items[0];
-      const links=items.flatMap(([k,c])=>k==='tring'
-        ?Object.entries(c.metrics||{}).map(([m,mc])=>`<a href="${reportHref(k,'outlet',m)}">${esc(mc.title)}<b>→</b></a>`)
-        :[`<a href="${reportHref(k,c.scopes?.[0])}">${esc(c.title)}<b>→</b></a>`]
-      ).join('');
-      return `<article class="category-card"><div class="category-card-head"><div><span>${esc(navName)}</span><h2>${esc(navName)}</h2></div><a href="${reportHref(first[0],first[1].scopes?.[0],first[0]==='tring'?'nasabah':null)}">Buka →</a></div><div class="mini-links">${links}</div></article>`;
-    }).join('');
+  function updateUrl(changes={}) {
+    const p = new URLSearchParams(location.search);
+    p.set('category', currentGroup);
+    p.set('scope', currentScope);
+    if (currentMetric) p.set('component', currentMetric); else p.delete('component');
+    p.set('sort', currentSort);
+    p.set('filter', currentCategoryFilter);
+    p.set('target', showTarget ? '1' : '0');
+    Object.entries(changes).forEach(([k,v]) => v === null ? p.delete(k) : p.set(k, String(v)));
+    history.replaceState(null, '', `${location.pathname}?${p.toString()}`);
   }
 
-  function metricCards(){
-    const arr=data.insights?.TRING||[];
-    return `<section class="metric-cards">${arr.map(c=>{
-      const p=c.percent==null?0:Math.min(100,Math.max(0,Number(c.percent)));
-      return `<a class="metric-card ${c.metric===currentMetric?'active':''}" href="${reportHref('tring','outlet',c.metric)}"><div class="donut" style="--p:${Number(p).toFixed(2)}"><div><b>${pct(c.percent)}</b><span>dari target</span></div></div><div><small>TRING</small><h3>${esc(c.title)}</h3><strong>${fmt(c.current,0)}</strong><span>Target ${fmt(c.target,0)}</span></div></a>`;
-    }).join('')}</section>`;
+  function navigateGroup(group) {
+    currentGroup = group;
+    currentScope = group === 'KPI' ? 'cabang' : 'outlet';
+    currentCategoryFilter = 'ALL';
+    const first = data?.metric_groups?.[group]?.[0];
+    currentMetric = first?.key || '';
+    currentSort = group === 'KPI' ? 'achievement' : 'achievement';
+    updateUrl(); render();
+  }
+  function navigateMetric(key) { currentMetric=key; currentCategoryFilter='ALL'; updateUrl(); render(); }
+  function navigateScope(scope) { currentScope=scope; currentCategoryFilter='ALL'; updateUrl(); render(); }
+
+  function renderNav() {
+    const nav = $('categoryNav');
+    nav.innerHTML = GROUP_ORDER.map(group => `<button type="button" class="nav-tab ${currentGroup===group?'active':''}" data-group="${group}"><span>${esc(group==='KPI'?'KPI':group==='NASABAH'?'Nasabah':group==='KREDIT'?'Kredit':group==='EMAS'?'Emas':group==='TRING'?'Tring':group==='SINERGI HOLDING'?'Sinergi Holding':'OSL')}</span>${group==='KPI'?'<small>Area & peringkat</small>':''}</button>`).join('');
+    nav.querySelectorAll('[data-group]').forEach(btn=>btn.addEventListener('click',()=>navigateGroup(btn.dataset.group)));
   }
 
-  function kpiCards(activeKey){
-    const arr=data.insights?.['PROGRES KPI']||[];
-    return `<section class="kpi-cards">${arr.map(c=>`<a class="kpi-card ${activeKey===c.key?'active':''}" href="${reportHref(c.key,(data.reports_meta[c.key]?.scopes||[])[0])}"><div class="kpi-head"><span>${esc(c.title)}</span><i>›</i></div>${c.has_comparison?`<div class="kpi-moves"><div class="up"><b>${c.up}</b><span>Bertumbuh</span></div><div class="down"><b>${c.down}</b><span>Berkurang</span></div><div class="flat"><b>${c.flat}</b><span>Tetap</span></div><div class="move-total"><b>${signed(c.sum_dtd,2)}</b><span>Total DTD</span></div></div>`:`<div class="kpi-pending">Baseline tersimpan · menunggu tanggal berikutnya</div>`}</a>`).join('')}</section>`;
+  function pageHeader() {
+    const latest = data?.latest || data?.generated_at?.slice(0,10);
+    const titles = {KPI:'Monitoring KPI Tahunan', OSL:'Monitoring OSL', NASABAH:'Monitoring Nasabah', KREDIT:'Monitoring Kredit', EMAS:'Monitoring Emas', TRING:'Monitoring TRING', 'SINERGI HOLDING':'Monitoring Sinergi Holding'};
+    const subtitles = {KPI:'Peringkat KPI tahunan Area Senen, cabang, dan outlet.', OSL:'Pantau OSL aktif rata-rata dan OSL gross posisi.', NASABAH:'Pantau pertumbuhan dan pencapaian nasabah.', KREDIT:'Pantau NPL dan LAR per unit kerja.', EMAS:'Pantau pencapaian produk emas.', TRING:'Pantau nasabah, layanan OSL, dan frekuensi transaksi TRING.', 'SINERGI HOLDING':'Pantau Cashless Disbursement, OSL, dan TE Sinergi Holding.'};
+    return `<section class="page-hero"><div class="page-hero-copy"><div class="eyebrow">MONITORING KINERJA AREA SENEN</div><h1>${titles[currentGroup]}</h1><p>${subtitles[currentGroup]}</p></div><div class="hero-status"><span class="status-dot"></span><div><small>DATA TERBARU</small><strong>${dateLabel(latest)}</strong></div></div></section>`;
   }
 
-  const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-  const monthNamesUpper=monthNames.map(x=>x.toUpperCase());
-  const previousMonthEnd = d => { if(!d)return null; const [y,m]=String(d).split('-').map(Number); const x=new Date(Date.UTC(y,m-1,0)); return `${x.getUTCFullYear()}-${String(x.getUTCMonth()+1).padStart(2,'0')}-${String(x.getUTCDate()).padStart(2,'0')}`; };
-  const previousYearEnd = d => { if(!d)return null; return `${Number(String(d).slice(0,4))-1}-12-31`; };
-  const dateLong = d => { if(!d)return '—'; const x=new Date(`${d}T00:00:00`); return `${x.getDate()} ${monthNames[x.getMonth()]} ${x.getFullYear()}`; };
-  const dateLongUpper = d => dateLong(d).toUpperCase();
-  const monthYearUpper = d => { if(!d)return '—'; const x=new Date(`${d}T00:00:00`); return `${monthNamesUpper[x.getMonth()]} ${x.getFullYear()}`; };
-
-  function tableFlags(key,cfg){
-    return {
-      isTarget:['target','deposito','nasabah','osl'].includes(cfg.kind)||key==='tring',
-      isAchievement:['nasabah_baru','nasabah_aktif','deposito_monitoring','tring'].includes(key),
-      showMtd:['nasabah_aktif','nasabah_baru','osl_rata_emas','omset_emas','deposito_monitoring'].includes(key),
-      showYtd:['osl_rata_emas','omset_emas','deposito_monitoring'].includes(key)
-    };
+  function getKpiView(scope) { return data?.kpi_views?.[scope] || null; }
+  function aggregateView(v) {
+    const rows = v?.rows || [];
+    const fields = ['left','right','last_month','dtd','mtd'];
+    const out = {};
+    fields.forEach(f => out[f] = rows.reduce((sum,r)=>sum+(Number(r[f])||0),0));
+    out.current = valid(out.right) ? out.right : out.left;
+    return out;
   }
 
-  function table(key,cfg,v){
-    if(cfg.kind==='mulia') return muliaTable(v);
-    const {isTarget,isAchievement,showMtd,showYtd}=tableFlags(key,cfg);
-    let h='<th>NO</th><th>'+(v.scope==='cabang'?'CABANG':'OUTLET')+'</th>';
-    if(isTarget) h+='<th>TARGET TAHUNAN</th>';
-    if(showMtd||showYtd){
-      if(showYtd)h+=`<th>${esc(dateLabel(previousYearEnd(v.right_date||v.left_date)))}</th>`;
-      if(showMtd)h+=`<th>${esc(dateLabel(previousMonthEnd(v.right_date||v.left_date)))}</th>`;
-      h+=`<th>${esc(dateLabel(v.left_date))}</th><th>${esc(dateLabel(v.right_date))}</th><th>DTD</th><th>DTD %</th>`;
-      if(showMtd)h+='<th>MTD</th><th>MTD %</th>';
-      if(showYtd)h+='<th>YTD</th><th>YTD %</th>';
-      if(isAchievement)h+='<th>PENCAPAIAN</th>';
-    } else {
-      if(key==='osl_rata_emas')h+=`<th>${esc(dateLabel(previousYearEnd(v.right_date||v.left_date)))}</th>`;
-      h+=`<th>${esc(dateLabel(v.left_date))}</th><th>${esc(dateLabel(v.right_date))}</th><th>DTD</th>`;
-      if(isTarget)h+='<th>PENCAPAIAN</th>'; else if(key==='osl_rata_emas')h+='<th>YOY</th>';
-    }
-    const body=(v.rows||[]).map((r,i)=>{
-      let x=`<tr><td>${i+1}</td><td class="left">${esc(r.unit_key)}</td>`;
-      if(isTarget)x+=`<td class="num">${fmt(r.target,cfg.decimals)}</td>`;
-      if(showMtd||showYtd){
-        if(showYtd)x+=`<td class="num">${fmt(r.prior_year,0)}</td>`;
-        if(showMtd)x+=`<td class="num">${fmt(r.last_month,0)}</td>`;
-        x+=`<td class="num">${fmt(r.left,0)}</td><td class="num latest-value">${fmt(r.right,0)}</td><td class="num ${cls(r.dtd)}">${signed(r.dtd,0)}</td><td class="num ${cls(r.dtd_pct)}">${pct(r.dtd_pct)}</td>`;
-        if(showMtd)x+=`<td class="num ${cls(r.mtd)}">${signed(r.mtd,0)}</td><td class="num ${cls(r.mtd_pct)}">${pct(r.mtd_pct)}</td>`;
-        if(showYtd)x+=`<td class="num ${cls(r.ytd)}">${signed(r.ytd,0)}</td><td class="num ${cls(r.ytd_pct)}">${pct(r.ytd_pct)}</td>`;
-        if(isAchievement)x+=`<td class="num ${Number(r.achievement_pct)>=100?'up':'down'}">${fmt(r.right??r.left,0)} / ${pct(r.achievement_pct)}</td>`;
-      } else {
-        if(key==='osl_rata_emas')x+=`<td class="num">${fmt(r.prior_year,0)}</td>`;
-        x+=`<td class="num">${fmt(r.left,cfg.decimals)}</td><td class="num latest-value">${fmt(r.right,cfg.decimals)}</td><td class="num ${cls(r.dtd)}">${signed(r.dtd,cfg.decimals)}</td>`;
-        if(isTarget)x+=`<td class="num ${Number(r.achievement_pct)>=100?'up':'down'}">${fmt(r.right??r.left,0)} / ${pct(r.achievement_pct)}</td>`;
-        else if(key==='osl_rata_emas')x+=`<td class="num ${cls(r.yoy_pct)}">${pct(r.yoy_pct)}</td>`;
-      }
-      return x+'</tr>';
-    }).join('');
-    return `<div class="table-scroll"><table class="report-table" id="reportTable"><thead><tr>${h}</tr></thead><tbody>${body}</tbody>${tableFooter(key,cfg,v)}</table></div>`;
+  function kpiSummaryCard() {
+    const v = getKpiView('area');
+    const r = v?.rows?.[0] || null;
+    const current = latestValue(r);
+    const dtd = valid(r?.dtd) ? Number(r.dtd) : null;
+    const mtd = valid(r?.mtd) ? Number(r.mtd) : null;
+    return `<section class="kpi-score-card"><div class="score-main"><span class="score-label">KPI TAHUNAN AREA SENEN</span><div class="score-value">${fmtMetric(current, {decimals:2})}</div><span class="score-caption">Akumulasi nilai KPI tahunan dari seluruh komponen</span></div><div class="score-moves"><div class="score-move"><span>Delta Day</span><strong class="${moneyClass(dtd)}">${signed(dtd,2)}</strong><small>${dateLabel(v?.left_date)} → ${dateLabel(v?.right_date)}</small></div><div class="score-move"><span>Delta Month</span><strong class="${moneyClass(mtd)}">${signed(mtd,2)}</strong><small>Sejak ${dateLabel(v?.last_month_date || v?.last_month_baseline_date)}</small></div></div></section>`;
   }
 
-  function tableFooter(key,cfg,v){
-    const {isTarget,isAchievement,showMtd,showYtd}=tableFlags(key,cfg);
-    const rows=v.rows||[];
-    const sum=k=>rows.reduce((a,r)=>a+(Number(r[k])||0),0);
-    const totalTarget=rows.reduce((a,r)=>a+(r.target==null?0:Number(r.target)),0);
-    const totalPriorYear=rows.reduce((a,r)=>a+(r.prior_year==null?0:Number(r.prior_year)),0);
-    const totalLastMonth=rows.reduce((a,r)=>a+(r.last_month==null?0:Number(r.last_month)),0);
-    const totalLeft=rows.reduce((a,r)=>a+(r.left==null?0:Number(r.left)),0);
-    const totalRight=rows.reduce((a,r)=>a+(r.right==null?0:Number(r.right)),0);
-    const hasRight=rows.some(r=>r.right!=null);
-    const totalDtd=rows.reduce((a,r)=>a+(r.dtd==null?0:Number(r.dtd)),0);
-    const currentTotal=hasRight?totalRight:totalLeft;
-    const achievementTotal=totalTarget>0?currentTotal/totalTarget*100:null;
-    const totalMtdCalc=currentTotal-totalLastMonth;
-    const totalYtdCalc=currentTotal-totalPriorYear;
-    const mtdPctTotal=totalLastMonth!==0?(currentTotal/totalLastMonth-1)*100:null;
-    const ytdPctTotal=totalPriorYear!==0?(currentTotal/totalPriorYear-1)*100:null;
-    let h='<tfoot><tr><td></td><td class="left">TOTAL</td>';
-    if(isTarget)h+=`<td class="num">${fmt(totalTarget,cfg.decimals)}</td>`;
-    if(showMtd||showYtd){
-      if(showYtd)h+=`<td class="num">${fmt(totalPriorYear,0)}</td>`;
-      if(showMtd)h+=`<td class="num">${fmt(totalLastMonth,0)}</td>`;
-      h+=`<td class="num">${fmt(totalLeft,0)}</td><td class="num">${hasRight?fmt(totalRight,0):'—'}</td><td class="num ${cls(totalDtd)}">${v.has_comparison?signed(totalDtd,0):'—'}</td><td class="num">${v.has_comparison&&Math.abs(totalLeft)>1e-12?pct((totalRight/totalLeft-1)*100):'—'}</td>`;
-      if(showMtd)h+=`<td class="num ${cls(totalMtdCalc)}">${signed(totalMtdCalc,0)}</td><td class="num ${cls(mtdPctTotal)}">${pct(mtdPctTotal)}</td>`;
-      if(showYtd)h+=`<td class="num ${cls(totalYtdCalc)}">${signed(totalYtdCalc,0)}</td><td class="num ${cls(ytdPctTotal)}">${pct(ytdPctTotal)}</td>`;
-      if(isAchievement)h+=`<td class="num ${Number(achievementTotal)>=100?'up':'down'}">${fmt(currentTotal,0)} / ${pct(achievementTotal)}</td>`;
-    } else {
-      if(key==='osl_rata_emas')h+=`<td class="num">${fmt(totalPriorYear,cfg.decimals)}</td>`;
-      h+=`<td class="num">${fmt(totalLeft,cfg.decimals)}</td><td class="num">${hasRight?fmt(totalRight,cfg.decimals):'—'}</td><td class="num ${cls(totalDtd)}">${v.has_comparison?signed(totalDtd,cfg.decimals):'—'}</td>`;
-      if(isTarget)h+=`<td class="num">${fmt(currentTotal,0)} / ${pct(achievementTotal)}</td>`;
-      else if(key==='osl_rata_emas')h+='<td class="num">—</td>';
-    }
-    return h+'</tr></tfoot>';
+  function sortControl(kpiMode=false) {
+    const opts = kpiMode ? [['achievement','KPI Tahunan'],['dtd','Delta Day'],['mtd','Delta Month']] : [['achievement','Achievement'],['dtd','Delta Day'],['mtd','Delta Month']];
+    return `<div class="sort-control" role="group" aria-label="Urutkan tabel">${opts.map(([key,label])=>`<button type="button" class="sort-chip ${currentSort===key?'active':''}" data-sort="${key}">${label}${currentSort===key?' ↓':''}</button>`).join('')}</div>`;
   }
 
-  function muliaTable(v){
-  const rows=v.rows||[];
- const reportMonth=String(v.right_date||v.left_date||'').slice(0,7);
-const dateSet=new Set();
-rows.forEach(r=>Object.keys(r.series||{}).forEach(d=>dateSet.add(d)));
-const dates=[...dateSet].filter(d=>String(d).slice(0,7)===reportMonth).sort();
-
-  let h='<th>NO</th><th>KODE OUTLET</th><th>NAMA CABANG</th><th>NAMA OUTLET</th>'
-    +dates.map(d=>`<th>${esc(dateShort(d))}</th>`).join('')
-    +'<th>GRAND TOTAL</th>';
-
-  const totals=dates.map(d=>rows.reduce((a,r)=>a+(Number(r.series?.[d])||0),0));
-  const grand=rows.reduce((a,r)=>a+dates.reduce((x,d)=>x+(Number(r.series?.[d])||0),0),0);
-
-  const b=rows.map((r,i)=>{
-    const gt=dates.reduce((a,d)=>a+(Number(r.series?.[d])||0),0);
-    const cells=dates.map(d=>{
-      const n=Number(r.series?.[d]||0);
-      return `<td>${n?fmt(n,0):'—'}</td>`;
-    }).join('');
-    return `<tr><td>${i+1}</td><td>${esc(r.code||'')}</td><td>${esc(r.branch||'')}</td><td class="left">${esc(r.unit_name||'')}</td>${cells}<td class="num"><strong>${fmt(gt,0)}</strong></td></tr>`;
-  }).join('');
-
-  return `<div class="table-scroll"><table class="report-table mulia-table" id="reportTable"><thead><tr>${h}</tr></thead><tbody>${b}</tbody><tfoot><tr><td colspan="4">GRAND TOTAL</td>${totals.map(n=>`<td>${fmt(n,0)}</td>`).join('')}<td class="num">${fmt(grand,0)}</td></tr></tfoot></table></div>`;
-}
-
-  function kpiBranchFlyer(v){
-    const rows=[...(v.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name).localeCompare(String(b.unit_name),'id'));
-    const totalKpi=rows.reduce((a,r)=>a+(Number(r.right??r.left)||0),0);
-    const totalDtd=rows.reduce((a,r)=>a+(Number(r.dtd)||0),0);
-    return `<section class="kpi-branch-flyer"><div class="kpi-flyer-head"><div><span class="eyebrow light">PROGRES KPI TAHUNAN</span><h2>Performa Cabang</h2><p>Detail KPI terbaru · ${rows.length} cabang · kategori CP &amp; CPS</p></div><div class="kpi-flyer-total"><small>TOTAL NILAI KPI</small><strong>${fmt(totalKpi,2)}</strong><span>DTD ${signed(totalDtd,2)}</span></div></div><div class="kpi-branch-grid">${rows.map((r,i)=>{const value=Number(r.right??r.left??0);const share=totalKpi>0?value/totalKpi*100:0;const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';return `<article class="kpi-branch-card"><div class="kpi-rank">#${i+1}</div><div class="kpi-branch-top"><div><small>${category} · CABANG</small><h3>${esc(r.unit_name)}</h3></div><div class="kpi-dtd ${cls(r.dtd)}">${signed(r.dtd,2)}</div></div><div class="kpi-value">${fmt(value,2)}</div><div class="kpi-bar"><i style="width:${Math.min(100,share).toFixed(2)}%"></i></div><div class="kpi-branch-meta"><span>KONTRIBUSI KE TOTAL KPI</span><b>${num(share,1)}%</b></div></article>`}).join('')}</div></section>`;
+  function sortedKpiRows(v) {
+    const rows = [...(v?.rows||[])];
+    rows.sort((a,b)=>{
+      let av, bv;
+      if(currentSort==='dtd'){av=Number(a.dtd ?? -Infinity); bv=Number(b.dtd ?? -Infinity);}
+      else if(currentSort==='mtd'){av=Number(a.mtd ?? -Infinity); bv=Number(b.mtd ?? -Infinity);}
+      else {av=latestValue(a) ?? -Infinity; bv=latestValue(b) ?? -Infinity;}
+      return bv-av || String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id');
+    });
+    return rows;
   }
 
-  function muliaRowTotal(r){
-    return Object.values(r?.series||{}).reduce((a,v)=>a+(Number(v)||0),0);
+  function kpiRankTable(scope) {
+    const v = getKpiView(scope);
+    const rows = sortedKpiRows(v);
+    const title = scope==='cabang'?'Peringkat KPI Tahunan Cabang':'Peringkat KPI Tahunan Outlet';
+    const nameTitle = scope==='cabang'?'Cabang':'Outlet';
+    const headers = ['No',nameTitle,dateLabel(v?.last_month_date || v?.last_month_baseline_date),dateLabel(v?.left_date),dateLabel(v?.right_date),'Delta Day','Delta Month','KPI Tahunan'];
+    const tbody = rows.map((r,i)=>`<tr><td class="rank-cell">${i+1}</td><td class="unit-cell"><strong>${esc(r.unit_name || r.unit_key)}</strong><small>${esc(r.category || (scope==='cabang'?'CP/CPS':'Outlet'))}</small></td><td class="num">${nval(r.last_month,2)}</td><td class="num">${nval(r.left,2)}</td><td class="num latest-value">${nval(r.right,2)}</td><td class="num ${moneyClass(r.dtd)}">${signed(r.dtd,2)}</td><td class="num ${moneyClass(r.mtd)}">${signed(r.mtd,2)}</td><td class="num score-cell">${nval(latestValue(r),2)}</td></tr>`).join('');
+    return `<section class="panel rank-panel"><div class="panel-heading"><div><span class="section-kicker">RANKING</span><h2>${title}</h2><p>Diurutkan dari nilai KPI tahunan tertinggi.</p></div>${sortControl(true)}</div><div class="table-wrap"><table class="report-table export-table"><thead><tr>${headers.map((h,i)=>`<th class="${i>=2?'num':''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${tbody || `<tr><td colspan="8" class="empty-cell">Belum ada snapshot KPI untuk level ${nameTitle.toLowerCase()}.</td></tr>`}</tbody></table></div></section>`;
   }
 
-  function muliaLatestDate(r){
-    return Object.keys(r?.series||{})
-      .filter(d=>Number(r.series?.[d])>0)
-      .sort()
-      .pop() || '';
+  function renderKpi() {
+    const search = `<div class="kpi-intro"><div><span class="section-kicker">RINGKASAN AREA</span><h2>Gambaran KPI Area Senen</h2><p>Skor KPI dihitung dari penjumlahan nilai KPI tahunan pada sumber KPI.</p></div></div>`;
+    return `${search}${kpiSummaryCard()}${kpiRankTable('cabang')}${kpiRankTable('outlet')}`;
   }
 
-  function sortedMuliaRows(rows,sort='total'){
-    const out=[...(rows||[])];
-    return out.sort((a,b)=>{
-      const totalA=muliaRowTotal(a), totalB=muliaRowTotal(b);
-      const dateA=muliaLatestDate(a), dateB=muliaLatestDate(b);
-      if(sort==='latest_date'){
-        return (dateB.localeCompare(dateA))
-          || (totalB-totalA)
-          || String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id');
-      }
-      return (totalB-totalA)
-        || dateB.localeCompare(dateA)
-        || String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id');
+  function activeGroupMetrics() {
+    const items = data?.metric_groups?.[currentGroup] || [];
+    const expected = GROUP_COMPONENTS[currentGroup] || [];
+    return [...items].sort((a,b)=>{
+      const ai=expected.indexOf(String(a.title||'').toUpperCase());
+      const bi=expected.indexOf(String(b.title||'').toUpperCase());
+      return (ai<0?999:ai)-(bi<0?999:bi);
     });
   }
 
-  function sortKeysFor(key){
-    if(key==='mulia_by_order')return ['total','latest_date'];
-    const {showMtd,showYtd,isAchievement}=tableFlags(key,data.reports_meta[key]||{});
-    const isKpiPage=['lar_emas','deposito_emas_kpi','kpi_tahunan_outlet'].includes(key);
-    if(isKpiPage)return [];
-    return ['dtd',...(showMtd?['mtd']:[]),...(showYtd?['ytd']:[]),...(isAchievement?['achievement']:[])];
+  function areaAchievementTable(metrics) {
+    const rows = metrics.map(m=>{
+      const v=m.views?.area; const r=v?.rows?.[0] || null;
+      return {metric:m, row:r, current:latestValue(r), target:targetValue(r), achievement:achievement(r), gap:gap(r)};
+    }).sort((a,b)=>(b.achievement??-Infinity)-(a.achievement??-Infinity));
+    const body = rows.map((x,i)=>`<tr><td class="rank-cell">${i+1}</td><td class="component-cell"><strong>${esc(x.metric.title)}</strong><small>${esc(currentGroup)}</small></td>${showTarget?`<td class="num">${nval(x.target,x.metric.decimals)}</td>`:''}<td class="num latest-value">${nval(x.current,x.metric.decimals)}</td><td class="num"><span class="achievement-pill ${achClass(x.achievement)}">${pval(x.achievement)}</span></td><td class="num"><span class="gap-pill ${moneyClass(x.gap)}">${signed(x.gap,x.metric.decimals)}</span></td></tr>`).join('');
+    const header = `<th>No</th><th>Komponen</th>${showTarget?'<th class="num">Target Area</th>':''}<th class="num">Realisasi</th><th class="num">Achievement</th><th class="num">Gap Target</th>`;
+    return `<section class="panel area-panel"><div class="panel-heading"><div><span class="section-kicker">PENCAPAIAN AREA</span><h2>Pencapaian Area Senen</h2><p>Komponen diurutkan berdasarkan achievement tertinggi. Gap target = realisasi − target tahunan.</p></div><label class="toggle-target"><input type="checkbox" id="areaTargetToggle" ${showTarget?'checked':''}><span>Target Tahunan</span></label></div><div class="table-wrap"><table class="report-table area-table"><thead><tr>${header}</tr></thead><tbody>${body||`<tr><td colspan="${showTarget?6:5}" class="empty-cell">Data pencapaian Area belum tersedia.</td></tr>`}</tbody></table></div></section>`;
   }
 
-  let currentMetric='nasabah';
-  function reportData(key,scope,metric){
-    const cfg=data.reports_meta?.[key]||{};
-    const id=key==='tring'
-      ? `${key}:${metric||'nasabah'}:outlet`
-      : (cfg.scopes?.length ? `${key}:${scope||cfg.scopes[0]}` : `${key}:default`);
-    return data.reports?.[id]||null;
+  function metricTabs(metrics) {
+    return `<section class="metric-tab-section"><div class="metric-tab-head"><div><span class="section-kicker">PILIH KOMPONEN</span><h2>Detail ${esc(currentGroup)}</h2></div><span class="metric-count">${metrics.length} komponen</span></div><div class="metric-tabs" role="tablist">${metrics.map(m=>`<button type="button" class="metric-tab ${m.key===currentMetric?'active':''}" data-metric="${esc(m.key)}"><span>${esc(m.title)}</span><b>›</b></button>`).join('')}</div></section>`;
   }
 
-  function sortedRows(key,v,sort){
-    if(!v)return [];
-    if(key==='mulia_by_order')return sortedMuliaRows(v.rows||[],sort||'total');
-    const rows=[...(v.rows||[])];
-    if(!sort)return rows;
-    const val=r=>({achievement:r.achievement_pct,dtd:r.dtd,mtd:r.mtd,ytd:r.ytd}[sort]);
-    return rows.sort((a,b)=>(Number(val(b)??-Infinity)-Number(val(a)??-Infinity))||String(a.unit_key).localeCompare(String(b.unit_key),'id'));
+  function achClass(v) {
+    if (!valid(v)) return 'ach-none';
+    const x=Number(v);
+    if (x>=100) return 'ach-exceed';
+    if (x>=90) return 'ach-good';
+    if (x>=75) return 'ach-mid';
+    return 'ach-low';
   }
 
-  function reportExportSets(key,metric,scope,sort){
-    const cfg=data.reports_meta?.[key]||{};
-    if(key==='tring'){
-      const s=sort||'achievement';
-      return ['nasabah','frekuensi','osl'].map(m=>{
-        const view=reportData(key,'outlet',m);
-        return {key,metric:m,scope:'outlet',view:view?{...view,rows:sortedRows(key,view,s)}:null,sort:s};
-      });
-    }
-    if(key==='kpi_tahunan_outlet'){
-      return ['cabang','outlet'].map(s=>{
-        const view=reportData(key,s,null);
-        if(!view)return {key,metric:null,scope:s,view:null,sort:null};
-        const rows=[...(view.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id'));
-        return {key,metric:null,scope:s,view:{...view,rows},sort:null};
-      });
-    }
-    if(Array.isArray(cfg.scopes)&&cfg.scopes.includes('cabang')&&cfg.scopes.includes('outlet')){
-      const s=sort||null;
-      return ['cabang','outlet'].map(sc=>{
-        const view=reportData(key,sc,null);
-        return {key,metric:null,scope:sc,view:view?{...view,rows:s?sortedRows(key,view,s):[...(view.rows||[])]}:null,sort:s};
-      });
-    }
-    const s=sort||null;
-    const view=reportData(key,scope||null,null);
-    return [{key,metric:null,scope:scope||null,view:view?{...view,rows:s?sortedRows(key,view,s):[...(view.rows||[])]}:null,sort:s}];
+  function scopeFilterTabs() {
+    return `<div class="scope-tabs" role="group" aria-label="Pilih level data">${['area','cabang','outlet'].map(s=>`<button type="button" data-scope="${s}" class="scope-tab ${currentScope===s?'active':''}">${CATEGORY_LABEL[s]}</button>`).join('')}</div>`;
   }
 
-  function pdfTitles(key,metric,reportDate){
-    const d=dateLongUpper(reportDate), my=monthYearUpper(reportDate);
-    const map={
-      deposito_monitoring:`MONITORING PRODUK DEPOSITO EMAS KANTOR AREA SENEN ${d}`,
-      omset_emas:`MONEV KINERJA OMSET EMAS (TANPA MTE) AREA SENEN ${d}`,
-      mulia_by_order:`GRAMASI MULIA BY ORDER PER TANGGAL ${my}`,
-      osl_rata_emas:`MONITORING OSL AKTIF RATA RATA PRODUK EMAS ${d}`,
-      nasabah_baru:`JUMLAH NASABAH BARU PER TANGGAL ${d}`,
-      nasabah_aktif:`JUMLAH NASABAH AKTIF PEMBIAYAAN TAHUNAN ${d}`,
-      lar_emas:`PROGRES KPI LAR EMAS PER ${d}`,
-      deposito_emas_kpi:`PROGRES KPI DEPOSITO EMAS PER ${d}`,
-      kpi_tahunan_outlet:`PROGRES KPI TAHUNAN PER ${d}`,
-    };
-    if(key==='tring')return `DETAIL NASABAH AKTIF BERTRANSAKSI TRING ${d}`;
-    return map[key]||`${String(data.reports_meta?.[key]?.title||key).toUpperCase()} ${d}`;
+  function categoryFilters(rows) {
+    const cats=CATEGORY_BY_SCOPE[currentScope] || [];
+    if (currentScope==='area') return `<div class="category-filter"><span class="filter-label">Kategori</span><button type="button" class="filter-pill active" data-filter="ALL">AREA</button></div>`;
+    const available = cats.filter(c => (rows||[]).some(r => String(r.category||'').toUpperCase()===c));
+    const buttons = ['ALL',...cats].map(c=>`<button type="button" class="filter-pill ${currentCategoryFilter===c?'active':''}" data-filter="${c}">${c==='ALL'?'Semua':c}</button>`).join('');
+    return `<div class="category-filter"><span class="filter-label">Kategori</span>${buttons}</div>`;
   }
 
-  function pdfHeaderTitle(key,metric){
-    const map={
-      deposito_monitoring:'MONITORING PRODUK DEPOSITO EMAS KANTOR AREA SENEN',
-      omset_emas:'MONITORING OMSET PRODUK EMAS KANTOR AREA SENEN',
-      mulia_by_order:'Daftar Kredit Mulia By Status Order',
-      osl_rata_emas:'MONITORING OSL AKTIF RATA RATA PRODUK EMAS KANTOR AREA SENEN',
-      nasabah_baru:'JUMLAH NASABAH BARU',
-      nasabah_aktif:'NASABAH AKTIF PEMBIAYAAN TAHUNAN',
-      lar_emas:'PROGRES KPI LAR EMAS',
-      deposito_emas_kpi:'PROGRES KPI DEPOSITO EMAS',
-      kpi_tahunan_outlet:'PROGRES KPI TAHUNAN',
-    };
-    if(key==='tring')return String(data.reports_meta?.tring?.metrics?.[metric]?.title||metric||'TRING').toUpperCase();
-    return map[key]||String(data.reports_meta?.[key]?.title||key).toUpperCase();
-  }
-
-  function buildMatrix(key,v,scope,metric,forPdf=false){
-    const cfg=data.reports_meta?.[key]||{};
-    if(key==='mulia_by_order'){
-      const reportMonth=String(v?.right_date||v?.left_date||'').slice(0,7);
-      const dateSet=new Set();
-      (v?.rows||[]).forEach(r=>Object.keys(r.series||{}).forEach(d=>{if(String(d).slice(0,7)===reportMonth)dateSet.add(d);}));
-      const dates=[...dateSet].sort();
-      const headers=['NO','KODE OUTLET','NAMA CABANG','NAMA OUTLET',...dates.map(dateShort),'GRAND TOTAL'];
-      const rows=(v?.rows||[]).map((r,i)=>{
-        let gt=0; const cells=dates.map(d=>{const n=Number(r.series?.[d]||0);gt+=n;return n;});
-        return [i+1,r.code||'',r.branch||'',r.unit_name||'',...cells,gt];
-      });
-      const total=['GRAND TOTAL','','','',...dates.map(d=>(v?.rows||[]).reduce((a,r)=>a+(Number(r.series?.[d])||0),0)),(v?.rows||[]).reduce((a,r)=>a+dates.reduce((x,d)=>x+(Number(r.series?.[d])||0),0),0)];
-      return {headers,rows,total,reportDate:v?.right_date||v?.left_date,title:pdfTitles(key,metric,v?.right_date||v?.left_date),headerTitle:pdfHeaderTitle(key,metric),kind:'mulia'};
-    }
-    const {isTarget,isAchievement,showMtd,showYtd}=tableFlags(key,cfg);
-    const baseDate=v?.right_date||v?.left_date;
-    const pm=previousMonthEnd(baseDate), py=previousYearEnd(baseDate);
-    const headers=['NO',scope==='cabang'?'CABANG':'OUTLET'];
-    if(isTarget)headers.push('TARGET TAHUNAN');
-    if(showMtd||showYtd){
-      if(showYtd)headers.push(dateLabel(py));
-      if(showMtd)headers.push(dateLabel(pm));
-      headers.push(dateLabel(v.left_date),dateLabel(v.right_date),'DTD','DTD %');
-      if(showMtd)headers.push('MTD','MTD %');
-      if(showYtd)headers.push('YTD','YTD %');
-      if(isAchievement){
-        if(forPdf)headers.push('PENCAPAIAN'); else headers.push('REALISASI TERKINI','PENCAPAIAN %');
-      }
-    } else {
-      if(key==='osl_rata_emas')headers.push(dateLabel(py));
-      headers.push(dateLabel(v.left_date),dateLabel(v.right_date),'DTD');
-      if(isAchievement){ if(forPdf)headers.push('PENCAPAIAN'); else headers.push('REALISASI TERKINI','PENCAPAIAN %'); }
-      else if(key==='osl_rata_emas')headers.push('YOY %');
-    }
-    const rows=(v?.rows||[]).map((r,i)=>{
-      const a=[i+1,r.unit_key]; if(isTarget)a.push(r.target);
-      if(showMtd||showYtd){
-        if(showYtd)a.push(forPdf?fmt(r.prior_year,0):r.prior_year);
-        if(showMtd)a.push(forPdf?fmt(r.last_month,0):r.last_month);
-        a.push(
-          forPdf?fmt(r.left,cfg.decimals):r.left,
-          forPdf?fmt(r.right,cfg.decimals):r.right,
-          forPdf?signed(r.dtd,cfg.decimals):r.dtd,
-          forPdf?(r.dtd_pct==null?'—':pct(r.dtd_pct)):(r.dtd_pct==null?null:r.dtd_pct/100)
-        );
-        if(showMtd)a.push(
-          forPdf?signed(r.mtd,cfg.decimals):r.mtd,
-          forPdf?(r.mtd_pct==null?'—':pct(r.mtd_pct)):(r.mtd_pct==null?null:r.mtd_pct/100)
-        );
-        if(showYtd)a.push(
-          forPdf?signed(r.ytd,cfg.decimals):r.ytd,
-          forPdf?(r.ytd_pct==null?'—':pct(r.ytd_pct)):(r.ytd_pct==null?null:r.ytd_pct/100)
-        );
-        if(isAchievement){
-          const cur=r.right??r.left;
-          if(forPdf)a.push(`${fmt(cur,0)} / ${pct(r.achievement_pct)}`); else a.push(cur,r.achievement_pct==null?null:r.achievement_pct/100);
-        }
-      } else {
-        if(key==='osl_rata_emas')a.push(forPdf?fmt(r.prior_year,0):r.prior_year);
-        a.push(forPdf?fmt(r.left,cfg.decimals):r.left,forPdf?fmt(r.right,cfg.decimals):r.right,forPdf?signed(r.dtd,cfg.decimals):r.dtd);
-        if(isAchievement){const cur=r.right??r.left;if(forPdf)a.push(`${fmt(cur,0)} / ${pct(r.achievement_pct)}`);else a.push(cur,r.achievement_pct==null?null:r.achievement_pct/100);}
-        else if(key==='osl_rata_emas')a.push(forPdf?(r.yoy_pct==null?'—':pct(r.yoy_pct)):(r.yoy_pct==null?null:r.yoy_pct/100));
-      }
-      return a;
+  function filterAndSortRows(v) {
+    let rows = [...(v?.rows||[])];
+    if (currentScope!=='area' && currentCategoryFilter!=='ALL') rows=rows.filter(r=>String(r.category||'').toUpperCase()===currentCategoryFilter);
+    const q=searchTerm.trim().toLowerCase();
+    if(q) rows=rows.filter(r=>`${r.unit_name||''} ${r.unit_key||''} ${r.category||''}`.toLowerCase().includes(q));
+    const metric = currentMetricObj(); const dec=Number(metric?.decimals||0);
+    rows.sort((a,b)=>{
+      let av,bv;
+      if(currentSort==='dtd'){av=valid(a.dtd)?Number(a.dtd):-Infinity;bv=valid(b.dtd)?Number(b.dtd):-Infinity;}
+      else if(currentSort==='mtd'){av=valid(a.mtd)?Number(a.mtd):-Infinity;bv=valid(b.mtd)?Number(b.mtd):-Infinity;}
+      else {av=achievement(a);bv=achievement(b);av=av===null?-Infinity:av;bv=bv===null?-Infinity:bv;}
+      return bv-av || String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id');
     });
-    const total=[];
-    const rowsRaw=v?.rows||[];
-    const sum=k=>rowsRaw.reduce((a,r)=>a+(Number(r[k])||0),0);
-    const totalTarget=rowsRaw.reduce((a,r)=>a+(r.target==null?0:Number(r.target)),0);
-    const totalPriorYear=rowsRaw.reduce((a,r)=>a+(r.prior_year==null?0:Number(r.prior_year)),0);
-    const totalLastMonth=rowsRaw.reduce((a,r)=>a+(r.last_month==null?0:Number(r.last_month)),0);
-    const totalLeft=rowsRaw.reduce((a,r)=>a+(r.left==null?0:Number(r.left)),0);
-    const totalRight=rowsRaw.reduce((a,r)=>a+(r.right==null?0:Number(r.right)),0);
-    const hasRight=rowsRaw.some(r=>r.right!=null);
-    const totalDtd=rowsRaw.reduce((a,r)=>a+(r.dtd==null?0:Number(r.dtd)),0);
-    const currentTotal=hasRight?totalRight:totalLeft;
-    const achievementTotal=totalTarget>0?currentTotal/totalTarget*100:null;
-    const totalMtdCalc=currentTotal-totalLastMonth;
-    const totalYtdCalc=currentTotal-totalPriorYear;
-    const mtdPctTotal=totalLastMonth!==0?(currentTotal/totalLastMonth-1)*100:null;
-    const ytdPctTotal=totalPriorYear!==0?(currentTotal/totalPriorYear-1)*100:null;
-    total.push('','TOTAL');
-    if(isTarget)total.push(forPdf?fmt(totalTarget,cfg.decimals):totalTarget);
-    if(showMtd||showYtd){
-      if(showYtd)total.push(forPdf?fmt(totalPriorYear,0):totalPriorYear);
-      if(showMtd)total.push(forPdf?fmt(totalLastMonth,0):totalLastMonth);
-      total.push(forPdf?fmt(totalLeft,0):totalLeft,forPdf?(hasRight?fmt(totalRight,0):'—'):(hasRight?totalRight:null),forPdf?(v.has_comparison?signed(totalDtd,0):'—'):(v.has_comparison?totalDtd:null),forPdf?(v.has_comparison&&Math.abs(totalLeft)>1e-12?pct((totalRight/totalLeft-1)*100):'—'):(v.has_comparison&&Math.abs(totalLeft)>1e-12?(totalRight/totalLeft-1):null));
-      if(showMtd)total.push(forPdf?signed(totalMtdCalc,0):totalMtdCalc,forPdf?pct(mtdPctTotal):mtdPctTotal==null?null:mtdPctTotal/100);
-      if(showYtd)total.push(forPdf?signed(totalYtdCalc,0):totalYtdCalc,forPdf?pct(ytdPctTotal):ytdPctTotal==null?null:ytdPctTotal/100);
-      if(isAchievement)total.push(forPdf?`${fmt(currentTotal,0)} / ${pct(achievementTotal)}`:currentTotal);
-      if(!forPdf&&isAchievement)total.push(achievementTotal==null?null:achievementTotal/100);
-    } else {
-      if(key==='osl_rata_emas')total.push(forPdf?fmt(totalPriorYear,cfg.decimals):totalPriorYear);
-      total.push(forPdf?fmt(totalLeft,cfg.decimals):totalLeft,forPdf?(hasRight?fmt(totalRight,cfg.decimals):'—'):(hasRight?totalRight:null),forPdf?(v.has_comparison?signed(totalDtd,cfg.decimals):'—'):(v.has_comparison?totalDtd:null));
-      if(isAchievement)total.push(forPdf?`${fmt(currentTotal,0)} / ${pct(achievementTotal)}`:currentTotal,achievementTotal==null?null:achievementTotal/100);
-      else if(key==='osl_rata_emas')total.push(forPdf?'—':null);
-    }
-    return {headers,rows,total,reportDate:baseDate,title:pdfTitles(key,metric,baseDate),headerTitle:pdfHeaderTitle(key,metric),kind:'standard'};
+    return rows;
   }
 
-  function applySheetWidths(ws,headers){
-    ws['!cols']=headers.map((h,i)=>({wch:Math.min(24,Math.max(8,String(h).length+2+(i===1?8:0)))}));
-    ws['!freeze']={xSplit:0,ySplit:1};
+  function tableGapCell(r,m) {
+    const g=gap(r);
+    return `<td class="num"><span class="gap-pill ${moneyClass(g)}">${signed(g,Number(m?.decimals||0))}</span></td>`;
   }
 
-  function buildKpiBranchExcelSheet(set){
-    const rows=[...(set.view?.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name||'').localeCompare(String(b.unit_name||''),'id'));
-    const total=rows.reduce((a,r)=>a+(Number(r.right??r.left??0)||0),0);
-    const aoa=[
-      ['PROGRES KPI TAHUNAN'],
-      [dateLongUpper(set.view?.right_date||set.view?.left_date)],
-      ['TOTAL NILAI KPI',total],
-      [],
-      ['RANK','KATEGORI','CABANG','NILAI KPI','KONTRIBUSI','VISUAL','DTD']
-    ];
-    rows.forEach((r,i)=>{
-      const value=Number(r.right??r.left??0), share=total?value/total:0;
-      const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';
-      const bar='█'.repeat(Math.max(0,Math.min(30,Math.round(share*30))));
-      aoa.push([i+1,category,r.unit_name||'',value,share,bar,Number(r.dtd??0)]);
-    });
-    const ws=XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:6}},{s:{r:1,c:0},e:{r:1,c:6}}];
-    ws['!cols']=[{wch:8},{wch:10},{wch:28},{wch:15},{wch:14},{wch:34},{wch:14}];
-    ws['!rows']=[{hpt:24},{hpt:18},{hpt:20},{hpt:8},{hpt:20}];
-    rows.forEach((_,i)=>{
-      const r=i+5;
-      const pctCell=ws[XLSX.utils.encode_cell({r,c:4})]; if(pctCell)pctCell.z='0.0%';
-      const valCell=ws[XLSX.utils.encode_cell({r,c:3})]; if(valCell)valCell.z='0.00';
-      const dtdCell=ws[XLSX.utils.encode_cell({r,c:6})]; if(dtdCell)dtdCell.z='0.00';
-    });
-    return ws;
+  function componentDetailTable(m) {
+    const v=currentView(m,currentScope);
+    const rows=filterAndSortRows(v);
+    const dateMonth=v?.last_month_date || v?.last_month_baseline_date;
+    const nameHead=currentScope==='area'?'Area':currentScope==='cabang'?'Cabang':'Outlet';
+    const heads=['No',nameHead,...(showTarget?['Target Tahunan']:[]),dateLabel(dateMonth),dateLabel(v?.left_date),dateLabel(v?.right_date),'Delta Day','Delta Month','Ach %','Gap Target'];
+    let previousRows='';
+    const body=rows.map((r,i)=>{
+      const ac=achievement(r);
+      let cells=`<td class="rank-cell">${i+1}</td><td class="unit-cell"><strong>${esc(r.unit_name||r.unit_key)}</strong><small>${esc(r.category||'')}</small></td>`;
+      if(showTarget) cells+=`<td class="num target-cell">${nval(r.target,m.decimals)}</td>`;
+      cells+=`<td class="num">${nval(r.last_month,m.decimals)}</td><td class="num">${nval(r.left,m.decimals)}</td><td class="num latest-value">${nval(r.right,m.decimals)}</td>`;
+      cells+=`<td class="num"><span class="delta-pill ${moneyClass(r.dtd)}">${signed(r.dtd,m.decimals)}</span></td><td class="num"><span class="delta-pill ${moneyClass(r.mtd)}">${signed(r.mtd,m.decimals)}</span></td>`;
+      cells+=`<td class="num"><span class="achievement-pill ${achClass(ac)}">${pval(ac)}</span></td>${tableGapCell(r,m)}`;
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    const noData = rows.length ? '' : `<tr><td colspan="${heads.length}" class="empty-cell">Belum ada snapshot untuk komponen ini. Upload file KPI pada localhost, lalu klik Publish Public Data.</td></tr>`;
+    return `<section class="panel detail-panel"><div class="panel-heading detail-heading"><div><span class="section-kicker">TABEL DETAIL</span><h2>${esc(m?.title||'Pilih komponen')}</h2><p>${CATEGORY_LABEL[currentScope]} · data terbaru ${dateLabel(v?.right_date || data?.latest)}</p></div><div class="detail-actions"><button type="button" class="export-button" id="downloadExcel"><span>↓</span> Excel</button><button type="button" class="export-button secondary" id="downloadPdf"><span>↓</span> PDF</button></div></div><div class="table-tools">${scopeFilterTabs()}${categoryFilters(v?.rows)}<div class="target-search"><label class="toggle-target"><input type="checkbox" id="targetToggle" ${showTarget?'checked':''}><span>Target Tahunan</span></label><label class="search-box"><span>⌕</span><input id="tableSearch" type="search" placeholder="Cari cabang atau outlet…" value="${esc(searchTerm)}"></label></div>${sortControl(false)}</div><div class="table-wrap"><table class="report-table export-table" id="reportTable"><thead><tr>${heads.map((h,i)=>`<th class="${i>=2?'num':''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}${noData}</tbody></table></div><div class="table-footnote"><span>${rows.length.toLocaleString('id-ID')} baris</span><span>Achievement = realisasi ÷ target tahunan · Gap target = realisasi − target</span></div></section>`;
   }
 
-  function buildExcelWorkbook(sets,key,metric,scope){
+  function renderMetrics() {
+    const metrics=activeGroupMetrics();
+    if(!metrics.length) return `<section class="panel empty-panel"><h2>Data komponen belum tersedia</h2><p>Upload data KPI dari localhost dan gunakan tombol Publish Public Data supaya dashboard menerima komponen baru.</p></section>`;
+    if(!metrics.some(m=>m.key===currentMetric)) currentMetric=metrics[0].key;
+    return `${areaAchievementTable(metrics)}${metricTabs(metrics)}${componentDetailTable(currentMetricObj())}`;
+  }
+
+  function render() {
+    renderNav();
+    $('topDate').textContent = dateLabel(data?.latest || data?.generated_at?.slice(0,10));
+    const root=$('app');
+    root.innerHTML = `${pageHeader()}${currentGroup==='KPI'?renderKpi():renderMetrics()}`;
+    wireEvents();
+  }
+
+  function wireEvents() {
+    document.querySelectorAll('[data-metric]').forEach(btn=>btn.addEventListener('click',()=>navigateMetric(btn.dataset.metric)));
+    document.querySelectorAll('[data-scope]').forEach(btn=>btn.addEventListener('click',()=>navigateScope(btn.dataset.scope)));
+    document.querySelectorAll('[data-filter]').forEach(btn=>btn.addEventListener('click',()=>{currentCategoryFilter=btn.dataset.filter;updateUrl();render();}));
+    document.querySelectorAll('[data-sort]').forEach(btn=>btn.addEventListener('click',()=>{currentSort=btn.dataset.sort;updateUrl();render();}));
+    const targetToggle=$('targetToggle');
+    if(targetToggle) targetToggle.addEventListener('change',()=>{showTarget=targetToggle.checked;updateUrl();render();});
+    const areaTargetToggle=$('areaTargetToggle');
+    if(areaTargetToggle) areaTargetToggle.addEventListener('change',()=>{showTarget=areaTargetToggle.checked;updateUrl();render();});
+    const search=$('tableSearch');
+    if(search) search.addEventListener('input',()=>{searchTerm=search.value;const q=searchTerm.toLowerCase();document.querySelectorAll('#reportTable tbody tr').forEach(tr=>tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none');});
+    const excel=$('downloadExcel'); if(excel) excel.addEventListener('click',downloadExcel);
+    const pdf=$('downloadPdf'); if(pdf) pdf.addEventListener('click',downloadPdf);
+  }
+
+  function exportTables() {
+    if(currentGroup==='KPI') return [...document.querySelectorAll('.rank-panel .report-table')];
+    const table=$('reportTable'); return table ? [table] : [];
+  }
+  function exportFilename(ext) {
+    const m=currentMetricObj();
+    const label=currentGroup==='KPI'?'PERINGKAT_KPI_TAHUNAN':(m?.title||currentGroup).replace(/[^A-Z0-9]+/gi,'_');
+    return `MONITORING_AREA_SENEN_${label}_${String(data?.latest||new Date().toISOString().slice(0,10)).replaceAll('-','')}.${ext}`;
+  }
+  function downloadExcel() {
+    if(!window.XLSX){window.alert('Library Excel belum termuat. Periksa koneksi internet lalu coba lagi.');return;}
+    const tables=exportTables(); if(!tables.length) return;
     const wb=XLSX.utils.book_new();
-    sets.forEach(set=>{
-      if(!set.view)return;
-      if(key==='kpi_tahunan_outlet'&&set.scope==='cabang'){
-        XLSX.utils.book_append_sheet(wb,buildKpiBranchExcelSheet(set),'Cabang');
-        return;
-      }
-      const matrix=buildMatrix(set.key,set.view,set.scope,set.metric,false);
-      const ws=XLSX.utils.aoa_to_sheet([matrix.headers,...matrix.rows,matrix.total||[]]);
-      const pctCols=matrix.headers.reduce((a,h,i)=>String(h).toUpperCase().includes('%')?(a.push(i),a):a,[]);
-      const numCols=matrix.headers.map((_,i)=>i).filter(i=>i>1&&!pctCols.includes(i));
-      matrix.rows.forEach((row,ridx)=>{
-        pctCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:ridx+1,c})];if(cell&&typeof cell.v==='number')cell.z='0.0%';});
-        numCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:ridx+1,c})];if(cell&&typeof cell.v==='number')cell.z=(data.reports_meta?.[key]?.decimals??0)>0?'#,##0.00':'#,##0';});
-      });
-      const totalRow=matrix.rows.length+1;
-      pctCols.forEach(c=>{const cell=ws[XLSX.utils.encode_cell({r:totalRow,c})];if(cell&&typeof cell.v==='number')cell.z='0.0%';});
-      applySheetWidths(ws,matrix.headers);
-      let name=set.scope==='cabang'?'Cabang':set.scope==='outlet'?'Outlet':set.metric?set.metric.charAt(0).toUpperCase()+set.metric.slice(1):'Data';
-      if(key==='tring')name={nasabah:'Nasabah TRING',frekuensi:'Frekuensi TRING',osl:'OSL TRING'}[set.metric]||name;
-      name=name.slice(0,31);
-      XLSX.utils.book_append_sheet(wb,ws,name);
+    tables.forEach((table,i)=>{
+      const ws=XLSX.utils.table_to_sheet(table,{raw:true});
+      ws['!cols'] = Array.from({length:(ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).e.c+1 : 1)},(_,col)=>({wch:col<2?30:18}));
+      const scope = table.closest('.rank-panel')?.querySelector('h2')?.textContent || currentMetricObj()?.title || 'Monitoring';
+      XLSX.utils.book_append_sheet(wb,ws,String(scope).slice(0,31).replace(/[\\/*?:\[\]]/g,' ') || `Laporan${i+1}`);
     });
-    return wb;
+    XLSX.writeFile(wb,exportFilename('xlsx'));
   }
-
-  function pdfStyle(kind,rows,key){
-    const n=rows.length;
-    if(key==='nasabah_baru') return {fontSize:n>45?3.25:3.6,cellPadding:n>45?.28:.38};
-    if(kind==='mulia') return {fontSize:n>45?3.5:4.0,cellPadding:n>45?.32:.42};
-    if(n>60) return {fontSize:3.15,cellPadding:.28};
-    if(n>50) return {fontSize:3.45,cellPadding:.32};
-    if(n>40) return {fontSize:3.8,cellPadding:.38};
-    if(n>30) return {fontSize:4.2,cellPadding:.45};
-    return {fontSize:4.7,cellPadding:.52};
-  }
-
-  function drawPdfTablePage(doc,matrix,scope,key,metric){
-    const pw=doc.internal.pageSize.getWidth(), ph=doc.internal.pageSize.getHeight(), margin=5;
-    const st=pdfStyle(matrix.kind,matrix.rows,key);
-    const tableTop=20;
-    doc.autoTable({
-      startY:tableTop,
-      margin:{left:margin,right:margin,top:tableTop,bottom:5},
-      head:[matrix.headers],
-      body:matrix.rows,
-      foot:matrix.total?[matrix.total]:[],
-      showFoot:'lastPage',
-      theme:'grid',
-      pageBreak:'avoid',
-      rowPageBreak:'avoid',
-      tableWidth:'auto',
-      styles:{font:'helvetica',fontSize:st.fontSize,cellPadding:st.cellPadding,textColor:[20,45,39],lineColor:[185,199,192],lineWidth:.1,overflow:'ellipsize',valign:'middle',minCellHeight:0},
-      headStyles:{fillColor:[226,239,232],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize,halign:'center'},
-      footStyles:{fillColor:[214,230,221],textColor:[21,63,53],fontStyle:'bold',fontSize:st.fontSize},
-      alternateRowStyles:{fillColor:[250,252,250]},
-      columnStyles:{0:{halign:'center'}},
-      didDrawPage:()=>{
-        const headerTitle=matrix.headerTitle;
-        doc.setTextColor(18,56,47);
-        doc.setFont('helvetica','bold');
-        doc.setFontSize(9);
-        doc.text(headerTitle,pw/2,8,{align:'center'});
-        doc.setFont('helvetica','normal');
-        doc.setFontSize(6.5);
-        doc.text(dateLongUpper(matrix.reportDate),pw/2,13,{align:'center'});
-      }
+  function downloadPdf() {
+    if(!window.jspdf?.jsPDF){window.alert('Library PDF belum termuat. Periksa koneksi internet lalu coba lagi.');return;}
+    const tables=exportTables(); if(!tables.length) return;
+    const doc=new window.jspdf.jsPDF({orientation:'landscape',unit:'pt',format:'a4'});
+    tables.forEach((table,i)=>{
+      if(i>0) doc.addPage();
+      const label=table.closest('.rank-panel')?.querySelector('h2')?.textContent || currentMetricObj()?.title || 'Monitoring Area Senen';
+      doc.setFontSize(12); doc.setTextColor(0,75,66); doc.text(String(label).toUpperCase(),36,30);
+      doc.setFontSize(8); doc.setTextColor(90); doc.text(`Monitoring Area Senen · Data ${dateLabel(data?.latest)}`,36,43);
+      doc.autoTable({html:table,startY:53,theme:'grid',styles:{font:'helvetica',fontSize:7,cellPadding:4,overflow:'linebreak'},headStyles:{fillColor:[0,85,74],textColor:[255,255,255]},alternateRowStyles:{fillColor:[245,249,247]},margin:{left:30,right:30,bottom:30},horizontalPageBreak:true,horizontalPageBreakRepeat:0});
     });
+    doc.save(exportFilename('pdf'));
   }
 
-  function drawKpiBranchPage(doc,set){
-    const rows=[...(set.view?.rows||[])].sort((a,b)=>(Number(b.right??b.left??0)-Number(a.right??a.left??0))||String(a.unit_name).localeCompare(String(b.unit_name),'id'));
-    const pw=doc.internal.pageSize.getWidth(), ph=doc.internal.pageSize.getHeight();
-    const total=rows.reduce((a,r)=>a+(Number(r.right??r.left)||0),0);
-    doc.setFillColor(5,60,48);doc.rect(0,0,pw,35,'F');
-    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(11.5);doc.text(set.title,pw/2,8,{align:'center'});
-    doc.setFontSize(7.8);doc.text('PROGRES KPI TAHUNAN',pw/2,14,{align:'center'});
-    doc.setFontSize(6.7);doc.text(dateLongUpper(set.view?.right_date||set.view?.left_date),pw/2,19,{align:'center'});
-    doc.setFont('helvetica','normal');doc.text(`TOTAL NILAI KPI: ${fmt(total,2)}   ·   ${rows.length} CABANG`,pw/2,27,{align:'center'});
-
-    const gap=4,x0=8,width=(pw-16-gap)/2,top=41;
-    const cols=2, rowCount=Math.max(1,Math.ceil(rows.length/cols));
-    const cardH=Math.min(27,(ph-top-8-gap*(rowCount-1))/rowCount);
-    rows.forEach((r,i)=>{
-      const col=i%cols,row=Math.floor(i/cols),x=x0+col*(width+gap),y=top+row*(cardH+gap);
-      const value=Number(r.right??r.left??0),share=total?value/total*100:0;
-      const category=String(r.unit_name||'').toUpperCase().startsWith('CPS ')?'CPS':'CP';
-      doc.setFillColor(249,252,250);doc.setDrawColor(208,222,215);doc.roundedRect(x,y,width,cardH,2.2,2.2,'FD');
-      doc.setTextColor(104,122,114);doc.setFont('helvetica','bold');doc.setFontSize(cardH<21?4.5:5.1);doc.text(`#${i+1}  ${category} · CABANG`,x+4,y+5.5);
-      doc.setTextColor(18,61,50);doc.setFontSize(cardH<21?6.2:7);doc.text(String(r.unit_name||''),x+4,y+11);
-      doc.setFontSize(cardH<21?8.5:10);doc.text(fmt(value,2),x+4,y+18);
-      doc.setTextColor(Number(r.dtd??0)>=0?30:170,Number(r.dtd??0)>=0?122:45,Number(r.dtd??0)>=0?72:50);doc.setFontSize(cardH<21?5.2:6);doc.text(`DTD ${signed(r.dtd,2)}`,x+width-4,y+5.5,{align:'right'});
-      doc.setDrawColor(220,231,225);doc.setFillColor(231,240,235);doc.roundedRect(x+4,y+cardH-6,width-8,1.7,.8,.8,'FD');
-      doc.setFillColor(41,124,91);doc.roundedRect(x+4,y+cardH-6,(width-8)*Math.min(100,share)/100,1.7,.8,.8,'F');
-      doc.setTextColor(104,122,114);doc.setFontSize(4.4);doc.text(`KONTRIBUSI ${num(share,1)}%`,x+width-4,y+cardH-2,{align:'right'});
-    });
-  }
-
-  async function downloadExcel(key,metric,scope,sort){
-    if(!window.XLSX){alert('Komponen Excel belum termuat. Coba refresh halaman.');return;}
-    const exportSort=sort||sortKeysFor(key)[0]||null;
-    const sets=reportExportSets(key,metric,scope,exportSort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
-    const wb=buildExcelWorkbook(sets,key,metric,scope);
-    const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.xlsx`;
-    XLSX.writeFile(wb,filename);
-  }
-
-  async function downloadPdf(key,metric,scope,sort){
-    try{
-      if(!window.jspdf?.jsPDF||typeof window.jspdf.jsPDF!=='function'||typeof window.jspdf.jsPDF.API.autoTable!=='function'){alert('Komponen PDF belum termuat. Coba refresh halaman.');return;}
-      const exportSort=sort||sortKeysFor(key)[0]||null;
-    const sets=reportExportSets(key,metric,scope,exportSort); if(!sets.some(x=>x.view)){alert('Data belum tersedia.');return;}
-      const {jsPDF}=window.jspdf; const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); let first=true;
-      sets.forEach(set=>{
-        if(!set.view)return;
-        if(!first)doc.addPage();
-        first=false;
-        // Semua laporan PDF, termasuk Progres KPI Tahunan, memakai renderer tabel
-        // yang sama. Hindari renderer kartu khusus agar export tetap stabil.
-        drawPdfTablePage(doc,buildMatrix(set.key,set.view,set.scope,set.metric,true),set.scope,key,set.metric);
-      });
-      const filename=`${pdfTitles(key,metric,sets[0].view?.right_date||sets[0].view?.left_date).replace(/[^A-Za-z0-9_-]+/g,'_')}.pdf`; doc.save(filename);
-    }catch(err){console.error(err);alert('PDF gagal dibuat. Coba refresh halaman lalu ulangi.');}
-  }
-
-  function report(){
-    const key=qs.get('report')||'lar_emas';
-    const cfg=data.reports_meta?.[key];
-    if(!cfg){document.getElementById('app').innerHTML='<section class="empty-card"><div class="empty-mark">404</div><h2>Laporan tidak ditemukan</h2><p>Kembali ke dashboard publik.</p></section>';return;}
-    currentMetric=key==='tring'?(qs.get('metric')||'nasabah'):'nasabah';
-    let scope=qs.get('scope') || (cfg.scopes?.length ? cfg.scopes[0] : null);
-    const id=key==='tring' ? `${key}:${currentMetric}:outlet` : (cfg.scopes?.length ? `${key}:${scope}` : `${key}:default`);
-    let v=data.reports?.[id];
-    if(!v && key!=='tring' && cfg.scopes?.length) v=data.reports?.[`${key}:${scope}`];
-    if(!v){
-      document.getElementById('app').innerHTML='<section class="empty-card"><div class="empty-mark">!</div><h2>Data belum tersedia</h2><p>Belum ada snapshot publik untuk laporan ini.</p></section>';
-      nav(cfg.nav);
-      return;
-    }
-
-    document.title=`${cfg.title} — Monitoring Area Senen`;
-    document.getElementById('topDate').textContent=dateLabel(data.latest);
-    nav(cfg.nav);
-    const groups=navGroups();
-    const activeNav=cfg.nav;
-    const sub=key==='tring'
-      ?Object.entries(cfg.metrics||{}).map(([m,mc])=>`<a class="subtab ${m===currentMetric?'active':''}" href="${reportHref(key,'outlet',m)}">${esc(mc.title)}</a>`).join('')
-      :(groups[activeNav]||[]).map(([k,c])=>`<a class="subtab ${k===key?'active':''}" href="${reportHref(k,c.scopes?.[0])}">${esc(c.title)}</a>`).join('');
-    const scopes=(cfg.scopes||[]).map(s=>`<a class="scope-pill ${s===scope?'active':''}" href="${reportHref(key,s,currentMetric,qs.get('sort'))}">${esc(s.toUpperCase())}</a>`).join('');
-    const sortKeys=sortKeysFor(key);
-    const requestedSort=qs.get('sort');
-    const sort=sortKeys.includes(requestedSort)?requestedSort:sortKeys[0]||null;
-    if(sort){
-      if(key==='mulia_by_order')v={...v,rows:sortedMuliaRows(v.rows||[],sort)};
-      else{
-        const val=r=>({achievement:r.achievement_pct,dtd:r.dtd,mtd:r.mtd,ytd:r.ytd}[sort]);
-        v={...v,rows:[...(v.rows||[])].sort((a,b)=>(Number(val(b)??-Infinity)-Number(val(a)??-Infinity))||String(a.unit_key).localeCompare(String(b.unit_key),'id'))};
-      }
-    }
-    const sortLabel=s=>({achievement:'PENCAPAIAN',latest_date:'TANGGAL TERAKHIR',total:'TOTAL'}[s]||String(s).toUpperCase());
-    const sortBar=sortKeys.length?`<div class="sort-bar"><span>SORT BY</span>${sortKeys.map(s=>`<button class="sort-pill ${sort===s?'active':''}" data-sort="${s}">${sortLabel(s)}</button>`).join('')}</div>`:'';
-    let content='';
-    if(activeNav==='TRING') content+=metricCards();
-    else if(activeNav==='PROGRES KPI') content+=kpiCards(key);
-    content+=`<section class="subnav"><div class="subnav-inner">${sub}</div></section>`;
-    content+=`<div class="report-head"><div><span class="eyebrow">${esc(activeNav)}</span><h1>${esc(key==='tring'?(cfg.metrics[currentMetric]?.title||cfg.title):cfg.title)}</h1></div><div class="export-actions"><button class="pdf-button" id="downloadExcel" type="button">Download Excel</button><button class="pdf-button pdf-secondary" id="downloadPdf" type="button">Download PDF</button></div></div>`;
-    if(scopes)content+=`<div class="scope-switch"><span>LEVEL</span>${scopes}</div>`;
-    content+=sortBar;
-    if(key==='kpi_tahunan_outlet'&&scope==='cabang') content+=kpiBranchFlyer(v);
-    else content+=`<section class="table-card"><div class="table-bar"><div><b>${esc((key==='tring'?cfg.metrics[currentMetric]?.title:cfg.title).toUpperCase())}</b><span>${esc(key==='mulia_by_order'?dateLabel(v.right_date||v.left_date):dateLabel(v.left_date))}${key!=='mulia_by_order'&&v.has_comparison?' → '+esc(dateLabel(v.right_date)):''}</span></div><input id="tableSearch" placeholder="Cari ${scope==='cabang'?'cabang':'outlet'}..." type="search"></div><div class="public-table-host">${table(key,key==='tring'?cfg.metrics[currentMetric]:cfg,v)}</div></section>`;
-    document.getElementById('app').innerHTML=content;
-
-    const search=document.getElementById('tableSearch');
-    if(search)search.addEventListener('input',()=>{const term=search.value.toLowerCase();document.querySelectorAll('#reportTable tbody tr').forEach(tr=>tr.style.display=tr.textContent.toLowerCase().includes(term)?'':'none');});
-    document.querySelectorAll('[data-sort]').forEach(btn=>btn.addEventListener('click',()=>{
-      const s=btn.dataset.sort;
-      const next=new URLSearchParams(location.search); next.set('sort',s); location.search=next.toString();
-    }));
-    document.getElementById('downloadExcel')?.addEventListener('click',()=>downloadExcel(key,currentMetric,scope,sort));
-    document.getElementById('downloadPdf')?.addEventListener('click',()=>downloadPdf(key,currentMetric,scope,sort));
-  }
-
-  fetch(DATA,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('Data publik belum tersedia');return r.json();}).then(j=>{data=j;nav();if(location.pathname.endsWith('report.html'))report();else home();}).catch(()=>{
-    const a=document.getElementById('app')||document.getElementById('categoryGrid');
-    if(a)a.innerHTML='<section class="empty-card"><div class="empty-mark">!</div><h2>Data publik belum tersedia</h2><p>Jalankan Publish Public Data dari Admin lokal terlebih dahulu.</p></section>';
+  fetch(DATA_URL,{cache:'no-store'}).then(res=>{if(!res.ok) throw new Error('Data publik belum tersedia');return res.json();}).then(json=>{
+    data=json;
+    if(!currentMetric) currentMetric=data?.metric_groups?.[currentGroup]?.[0]?.key || '';
+    if(!data.metric_groups) data.metric_groups={};
+    render();
+  }).catch(err=>{
+    const root=$('app') || document.body;
+    root.innerHTML=`<section class="panel empty-panel"><h2>Data publik belum dapat dimuat</h2><p>${esc(err.message)}. Pastikan file <code>data/public-data.json</code> tersedia, lalu publish kembali dari Admin localhost.</p></section>`;
   });
 })();
