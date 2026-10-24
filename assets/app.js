@@ -1,12 +1,14 @@
 (() => {
   'use strict';
   const DATA_URL = 'data/public-data.json';
-  const GROUP_ORDER = ['KPI', 'OSL', 'NASABAH', 'KREDIT', 'EMAS', 'TRING', 'SINERGI HOLDING'];
+  const GROUP_ORDER = ['KPI', 'OSL', 'LABA USAHA', 'CIR', 'NASABAH', 'KREDIT', 'EMAS', 'TRING', 'SINERGI HOLDING'];
   const GROUP_COMPONENTS = {
+    'LABA USAHA': ['LABA USAHA'],
+    CIR: ['CIR'],
     OSL: ['OSL AKTIF RATA-RATA GADAI','OSL AKTIF RATA-RATA NON GADAI','OSL AKTIF RATA-RATA EMAS','OSL GROSS POSISI'],
     NASABAH: ['NASABAH BARU','NASABAH BARU AGEN','NASABAH PEMBIAYAAN TAHUNAN','NASABAH TABUNGAN EMAS'],
     KREDIT: ['NPL GADAI','NPL NON GADAI','NPL EMAS','LAR GADAI','LAR NON GADAI','LAR EMAS'],
-    EMAS: ['DEPOSITO EMAS','TABUNGAN EMAS','GRAMASI PRODUK GALERI 24'],
+    EMAS: ['TABUNGAN EMAS','DEPOSITO EMAS','GRAMASI PRODUK GALERI 24','KPI STRETCH GOAL'],
     TRING: ['NASABAH TRING!','OSL LAYANAN TRING!','FREKUENSI TRANSAKSI TRING!'],
     'SINERGI HOLDING': ['CASHLESS DISBURSEMENT','OSL SINERGI HOLDING','TE SINERGI HOLDING']
   };
@@ -75,15 +77,14 @@
 
   function renderNav() {
     const nav = $('categoryNav');
-    nav.innerHTML = GROUP_ORDER.map(group => `<button type="button" class="nav-tab ${currentGroup===group?'active':''}" data-group="${group}"><span>${esc(group==='KPI'?'KPI':group==='NASABAH'?'Nasabah':group==='KREDIT'?'Kredit':group==='EMAS'?'Emas':group==='TRING'?'Tring':group==='SINERGI HOLDING'?'Sinergi Holding':'OSL')}</span>${group==='KPI'?'<small>Area & peringkat</small>':''}</button>`).join('');
+    nav.innerHTML = GROUP_ORDER.map(group => `<button type="button" class="nav-tab ${currentGroup===group?'active':''}" data-group="${group}"><span>${esc(group==='KPI'?'KPI':group==='NASABAH'?'Nasabah':group==='KREDIT'?'Kredit':group==='EMAS'?'Emas':group==='TRING'?'Tring':group==='SINERGI HOLDING'?'Sinergi Holding':group==='LABA USAHA'?'Laba Usaha':group==='CIR'?'CIR':'OSL')}</span></button>`).join('');
     nav.querySelectorAll('[data-group]').forEach(btn=>btn.addEventListener('click',()=>navigateGroup(btn.dataset.group)));
   }
 
   function pageHeader() {
     const latest = data?.latest || data?.generated_at?.slice(0,10);
-    const titles = {KPI:'Monitoring KPI Tahunan', OSL:'Monitoring OSL', NASABAH:'Monitoring Nasabah', KREDIT:'Monitoring Kredit', EMAS:'Monitoring Emas', TRING:'Monitoring TRING', 'SINERGI HOLDING':'Monitoring Sinergi Holding'};
-    const subtitles = {KPI:'Peringkat KPI tahunan Area Senen, cabang, dan outlet.', OSL:'Pantau OSL aktif rata-rata dan OSL gross posisi.', NASABAH:'Pantau pertumbuhan dan pencapaian nasabah.', KREDIT:'Pantau NPL dan LAR per unit kerja.', EMAS:'Pantau pencapaian produk emas.', TRING:'Pantau nasabah, layanan OSL, dan frekuensi transaksi TRING.', 'SINERGI HOLDING':'Pantau Cashless Disbursement, OSL, dan TE Sinergi Holding.'};
-    return `<section class="page-hero"><div class="page-hero-copy"><div class="eyebrow">MONITORING KINERJA AREA SENEN</div><h1>${titles[currentGroup]}</h1><p>${subtitles[currentGroup]}</p></div><div class="hero-status"><span class="status-dot"></span><div><small>DATA TERBARU</small><strong>${dateLabel(latest)}</strong></div></div></section>`;
+    const titles = {KPI:'Monitoring KPI Tahunan', OSL:'Monitoring OSL', 'LABA USAHA':'Monitoring Laba Usaha', CIR:'Monitoring CIR', NASABAH:'Monitoring Nasabah', KREDIT:'Monitoring Kredit', EMAS:'Monitoring Emas', TRING:'Monitoring TRING', 'SINERGI HOLDING':'Monitoring Sinergi Holding'};
+    return `<section class="page-hero"><div class="page-hero-copy"><div class="eyebrow">MONITORING KINERJA AREA SENEN</div><h1>${titles[currentGroup] || 'Monitoring Area Senen'}</h1></div><div class="hero-status"><span class="status-dot"></span><div><small>DATA TERBARU</small><strong>${dateLabel(latest)}</strong></div></div></section>`;
   }
 
   function getKpiView(scope) { return data?.kpi_views?.[scope] || null; }
@@ -102,7 +103,7 @@
     const current = latestValue(r);
     const dtd = valid(r?.dtd) ? Number(r.dtd) : null;
     const mtd = valid(r?.mtd) ? Number(r.mtd) : null;
-    return `<section class="kpi-score-card"><div class="score-main"><span class="score-label">KPI TAHUNAN AREA SENEN</span><div class="score-value">${fmtMetric(current, {decimals:2})}</div><span class="score-caption">Akumulasi nilai KPI tahunan dari seluruh komponen</span></div><div class="score-moves"><div class="score-move"><span>Delta Day</span><strong class="${moneyClass(dtd)}">${signed(dtd,2)}</strong><small>${dateLabel(v?.left_date)} → ${dateLabel(v?.right_date)}</small></div><div class="score-move"><span>Delta Month</span><strong class="${moneyClass(mtd)}">${signed(mtd,2)}</strong><small>Sejak ${dateLabel(v?.last_month_date || v?.last_month_baseline_date)}</small></div></div></section>`;
+    return `<section class="kpi-score-card"><div class="score-main"><span class="score-label">KPI TAHUNAN AREA SENEN</span><div class="score-value">${fmtMetric(current, {decimals:2})}</div></div><div class="score-moves"><div class="score-move"><span>Delta Day</span><strong class="${moneyClass(dtd)}">${signed(dtd,2)}</strong><small>${dateLabel(v?.left_date)} → ${dateLabel(v?.right_date)}</small></div><div class="score-move"><span>Delta Month</span><strong class="${moneyClass(mtd)}">${signed(mtd,2)}</strong><small>Sejak ${dateLabel(v?.last_month_date || v?.last_month_baseline_date)}</small></div></div></section>`;
   }
 
   function sortControl(kpiMode=false) {
@@ -128,12 +129,12 @@
     const title = scope==='cabang'?'Peringkat KPI Tahunan Cabang':'Peringkat KPI Tahunan Outlet';
     const nameTitle = scope==='cabang'?'Cabang':'Outlet';
     const headers = ['No',nameTitle,dateLabel(v?.last_month_date || v?.last_month_baseline_date),dateLabel(v?.left_date),dateLabel(v?.right_date),'Delta Day','Delta Month','KPI Tahunan'];
-    const tbody = rows.map((r,i)=>`<tr><td class="rank-cell">${i+1}</td><td class="unit-cell"><strong>${esc(r.unit_name || r.unit_key)}</strong><small>${esc(r.category || (scope==='cabang'?'CP/CPS':'Outlet'))}</small></td><td class="num">${nval(r.last_month,2)}</td><td class="num">${nval(r.left,2)}</td><td class="num latest-value">${nval(r.right,2)}</td><td class="num ${moneyClass(r.dtd)}">${signed(r.dtd,2)}</td><td class="num ${moneyClass(r.mtd)}">${signed(r.mtd,2)}</td><td class="num score-cell">${nval(latestValue(r),2)}</td></tr>`).join('');
-    return `<section class="panel rank-panel"><div class="panel-heading"><div><span class="section-kicker">RANKING</span><h2>${title}</h2><p>Diurutkan dari nilai KPI tahunan tertinggi.</p></div>${sortControl(true)}</div><div class="table-wrap"><table class="report-table export-table"><thead><tr>${headers.map((h,i)=>`<th class="${i>=2?'num':''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${tbody || `<tr><td colspan="8" class="empty-cell">Belum ada snapshot KPI untuk level ${nameTitle.toLowerCase()}.</td></tr>`}</tbody></table></div></section>`;
+    const tbody = rows.map((r,i)=>`<tr><td class="rank-cell">${i+1}</td><td class="unit-cell"><strong>${esc(r.unit_name || r.unit_key)}</strong></td><td class="num">${nval(r.last_month,2)}</td><td class="num">${nval(r.left,2)}</td><td class="num latest-value">${nval(r.right,2)}</td><td class="num ${moneyClass(r.dtd)}">${signed(r.dtd,2)}</td><td class="num ${moneyClass(r.mtd)}">${signed(r.mtd,2)}</td><td class="num score-cell">${nval(latestValue(r),2)}</td></tr>`).join('');
+    return `<section class="panel rank-panel"><div class="panel-heading"><div><span class="section-kicker">RANKING</span><h2>${title}</h2></div>${sortControl(true)}</div><div class="table-wrap"><table class="report-table export-table"><thead><tr>${headers.map((h,i)=>`<th class="${i>=2?'num':''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${tbody || `<tr><td colspan="8" class="empty-cell">Belum ada snapshot KPI untuk level ${nameTitle.toLowerCase()}.</td></tr>`}</tbody></table></div></section>`;
   }
 
   function renderKpi() {
-    const search = `<div class="kpi-intro"><div><span class="section-kicker">RINGKASAN AREA</span><h2>Gambaran KPI Area Senen</h2><p>Skor KPI dihitung dari penjumlahan nilai KPI tahunan pada sumber KPI.</p></div></div>`;
+    const search = `<div class="kpi-intro"><div><span class="section-kicker">RINGKASAN AREA</span><h2>Gambaran KPI Area Senen</h2></div></div>`;
     return `${search}${kpiSummaryCard()}${kpiRankTable('cabang')}${kpiRankTable('outlet')}`;
   }
 
@@ -152,13 +153,14 @@
       const v=m.views?.area; const r=v?.rows?.[0] || null;
       return {metric:m, row:r, current:latestValue(r), target:targetValue(r), achievement:achievement(r), gap:gap(r)};
     }).sort((a,b)=>(b.achievement??-Infinity)-(a.achievement??-Infinity));
-    const body = rows.map((x,i)=>`<tr><td class="rank-cell">${i+1}</td><td class="component-cell"><strong>${esc(x.metric.title)}</strong><small>${esc(currentGroup)}</small></td>${showTarget?`<td class="num">${nval(x.target,x.metric.decimals)}</td>`:''}<td class="num latest-value">${nval(x.current,x.metric.decimals)}</td><td class="num"><span class="achievement-pill ${achClass(x.achievement)}">${pval(x.achievement)}</span></td><td class="num"><span class="gap-pill ${moneyClass(x.gap)}">${signed(x.gap,x.metric.decimals)}</span></td></tr>`).join('');
-    const header = `<th>No</th><th>Komponen</th>${showTarget?'<th class="num">Target Area</th>':''}<th class="num">Realisasi</th><th class="num">Achievement</th><th class="num">Gap Target</th>`;
-    return `<section class="panel area-panel"><div class="panel-heading"><div><span class="section-kicker">PENCAPAIAN AREA</span><h2>Pencapaian Area Senen</h2><p>Komponen diurutkan berdasarkan achievement tertinggi. Gap target = realisasi − target tahunan.</p></div><label class="toggle-target"><input type="checkbox" id="areaTargetToggle" ${showTarget?'checked':''}><span>Target Tahunan</span></label></div><div class="table-wrap"><table class="report-table area-table"><thead><tr>${header}</tr></thead><tbody>${body||`<tr><td colspan="${showTarget?6:5}" class="empty-cell">Data pencapaian Area belum tersedia.</td></tr>`}</tbody></table></div></section>`;
+    const body = rows.map((x,i)=>`<tr><td class="rank-cell">${i+1}</td><td class="component-cell"><strong>${esc(x.metric.title)}</strong></td><td class="num weight-cell">${valid(x.row?.bobot_kpi)?`${nval(x.row.bobot_kpi,2).replace(/,00$/, '')}%`:'—'}</td>${showTarget?`<td class="num">${nval(x.target,x.metric.decimals)}</td>`:''}<td class="num latest-value">${nval(x.current,x.metric.decimals)}</td><td class="num kpi-annual-cell">${nval(x.row?.nilai_kpi_tahunan,2)}</td><td class="num"><span class="achievement-pill ${achClass(x.achievement)}">${pval(x.achievement)}</span></td><td class="num"><span class="gap-pill ${moneyClass(x.gap)}">${signed(x.gap,x.metric.decimals)}</span></td></tr>`).join('');
+    const header = `<th>No</th><th>Komponen</th><th class="num">Bobot KPI</th>${showTarget?'<th class="num">Target Area</th>':''}<th class="num">Realisasi</th><th class="num">Nilai KPI Tahunan</th><th class="num">Achievement</th><th class="num">Gap Target</th>`;
+    const emptyCols = (showTarget ? 8 : 7);
+    return `<section class="panel area-panel"><div class="panel-heading"><div><span class="section-kicker">PENCAPAIAN AREA</span><h2>Pencapaian Area Senen</h2></div><label class="toggle-target"><input type="checkbox" id="areaTargetToggle" ${showTarget?'checked':''}><span>Target Tahunan</span></label></div><div class="table-wrap"><table class="report-table area-table"><thead><tr>${header}</tr></thead><tbody>${body||`<tr><td colspan="${emptyCols}" class="empty-cell">Data pencapaian Area belum tersedia.</td></tr>`}</tbody></table></div></section>`;
   }
 
   function metricTabs(metrics) {
-    return `<section class="metric-tab-section"><div class="metric-tab-head"><div><span class="section-kicker">PILIH KOMPONEN</span><h2>Detail ${esc(currentGroup)}</h2></div><span class="metric-count">${metrics.length} komponen</span></div><div class="metric-tabs" role="tablist">${metrics.map(m=>`<button type="button" class="metric-tab ${m.key===currentMetric?'active':''}" data-metric="${esc(m.key)}"><span>${esc(m.title)}</span><b>›</b></button>`).join('')}</div></section>`;
+    return `<section class="metric-tab-section"><div class="metric-tab-head"><div><h2>Detail ${esc(currentGroup)}</h2></div><span class="metric-count">${metrics.length} komponen</span></div><div class="metric-tabs" role="tablist">${metrics.map(m=>`<button type="button" class="metric-tab ${m.key===currentMetric?'active':''}" data-metric="${esc(m.key)}"><span>${esc(m.title)}</span><b>›</b></button>`).join('')}</div></section>`;
   }
 
   function achClass(v) {
@@ -174,17 +176,9 @@
     return `<div class="scope-tabs" role="group" aria-label="Pilih level data">${['area','cabang','outlet'].map(s=>`<button type="button" data-scope="${s}" class="scope-tab ${currentScope===s?'active':''}">${CATEGORY_LABEL[s]}</button>`).join('')}</div>`;
   }
 
-  function categoryFilters(rows) {
-    const cats=CATEGORY_BY_SCOPE[currentScope] || [];
-    if (currentScope==='area') return `<div class="category-filter"><span class="filter-label">Kategori</span><button type="button" class="filter-pill active" data-filter="ALL">AREA</button></div>`;
-    const available = cats.filter(c => (rows||[]).some(r => String(r.category||'').toUpperCase()===c));
-    const buttons = ['ALL',...cats].map(c=>`<button type="button" class="filter-pill ${currentCategoryFilter===c?'active':''}" data-filter="${c}">${c==='ALL'?'Semua':c}</button>`).join('');
-    return `<div class="category-filter"><span class="filter-label">Kategori</span>${buttons}</div>`;
-  }
 
   function filterAndSortRows(v) {
     let rows = [...(v?.rows||[])];
-    if (currentScope!=='area' && currentCategoryFilter!=='ALL') rows=rows.filter(r=>String(r.category||'').toUpperCase()===currentCategoryFilter);
     const q=searchTerm.trim().toLowerCase();
     if(q) rows=rows.filter(r=>`${r.unit_name||''} ${r.unit_key||''} ${r.category||''}`.toLowerCase().includes(q));
     const metric = currentMetricObj(); const dec=Number(metric?.decimals||0);
@@ -212,7 +206,7 @@
     let previousRows='';
     const body=rows.map((r,i)=>{
       const ac=achievement(r);
-      let cells=`<td class="rank-cell">${i+1}</td><td class="unit-cell"><strong>${esc(r.unit_name||r.unit_key)}</strong><small>${esc(r.category||'')}</small></td>`;
+      let cells=`<td class="rank-cell">${i+1}</td><td class="unit-cell"><strong>${esc(r.unit_name||r.unit_key)}</strong></td>`;
       if(showTarget) cells+=`<td class="num target-cell">${nval(r.target,m.decimals)}</td>`;
       cells+=`<td class="num">${nval(r.last_month,m.decimals)}</td><td class="num">${nval(r.left,m.decimals)}</td><td class="num latest-value">${nval(r.right,m.decimals)}</td>`;
       cells+=`<td class="num"><span class="delta-pill ${moneyClass(r.dtd)}">${signed(r.dtd,m.decimals)}</span></td><td class="num"><span class="delta-pill ${moneyClass(r.mtd)}">${signed(r.mtd,m.decimals)}</span></td>`;
@@ -220,7 +214,7 @@
       return `<tr>${cells}</tr>`;
     }).join('');
     const noData = rows.length ? '' : `<tr><td colspan="${heads.length}" class="empty-cell">Belum ada snapshot untuk komponen ini. Upload file KPI pada localhost, lalu klik Publish Public Data.</td></tr>`;
-    return `<section class="panel detail-panel"><div class="panel-heading detail-heading"><div><span class="section-kicker">TABEL DETAIL</span><h2>${esc(m?.title||'Pilih komponen')}</h2><p>${CATEGORY_LABEL[currentScope]} · data terbaru ${dateLabel(v?.right_date || data?.latest)}</p></div><div class="detail-actions"><button type="button" class="export-button" id="downloadExcel"><span>↓</span> Excel</button><button type="button" class="export-button secondary" id="downloadPdf"><span>↓</span> PDF</button></div></div><div class="table-tools">${scopeFilterTabs()}${categoryFilters(v?.rows)}<div class="target-search"><label class="toggle-target"><input type="checkbox" id="targetToggle" ${showTarget?'checked':''}><span>Target Tahunan</span></label><label class="search-box"><span>⌕</span><input id="tableSearch" type="search" placeholder="Cari cabang atau outlet…" value="${esc(searchTerm)}"></label></div>${sortControl(false)}</div><div class="table-wrap"><table class="report-table export-table" id="reportTable"><thead><tr>${heads.map((h,i)=>`<th class="${i>=2?'num':''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}${noData}</tbody></table></div><div class="table-footnote"><span>${rows.length.toLocaleString('id-ID')} baris</span><span>Achievement = realisasi ÷ target tahunan · Gap target = realisasi − target</span></div></section>`;
+    return `<section class="panel detail-panel"><div class="panel-heading detail-heading"><div><span class="section-kicker">TABEL DETAIL</span><h2>${esc(m?.title||'Pilih komponen')}</h2><p>${CATEGORY_LABEL[currentScope]} · data terbaru ${dateLabel(v?.right_date || data?.latest)}</p></div><div class="detail-actions"><button type="button" class="export-button" id="downloadExcel"><span>↓</span> Excel</button><button type="button" class="export-button secondary" id="downloadPdf"><span>↓</span> PDF</button></div></div><div class="table-tools">${scopeFilterTabs()}<div class="target-search"><label class="toggle-target"><input type="checkbox" id="targetToggle" ${showTarget?'checked':''}><span>Target Tahunan</span></label><label class="search-box"><span>⌕</span><input id="tableSearch" type="search" placeholder="Cari cabang atau outlet…" value="${esc(searchTerm)}"></label></div>${sortControl(false)}</div><div class="table-wrap"><table class="report-table export-table" id="reportTable"><thead><tr>${heads.map((h,i)=>`<th class="${i>=2?'num':''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}${noData}</tbody></table></div><div class="table-footnote"><span>${rows.length.toLocaleString('id-ID')} baris</span></div></section>`;
   }
 
   function renderMetrics() {
@@ -241,7 +235,6 @@
   function wireEvents() {
     document.querySelectorAll('[data-metric]').forEach(btn=>btn.addEventListener('click',()=>navigateMetric(btn.dataset.metric)));
     document.querySelectorAll('[data-scope]').forEach(btn=>btn.addEventListener('click',()=>navigateScope(btn.dataset.scope)));
-    document.querySelectorAll('[data-filter]').forEach(btn=>btn.addEventListener('click',()=>{currentCategoryFilter=btn.dataset.filter;updateUrl();render();}));
     document.querySelectorAll('[data-sort]').forEach(btn=>btn.addEventListener('click',()=>{currentSort=btn.dataset.sort;updateUrl();render();}));
     const targetToggle=$('targetToggle');
     if(targetToggle) targetToggle.addEventListener('change',()=>{showTarget=targetToggle.checked;updateUrl();render();});
